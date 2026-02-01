@@ -1,4 +1,4 @@
-package hyperliquid
+package models
 
 type RawFill struct {
 	Coin          string  `json:"coin"`

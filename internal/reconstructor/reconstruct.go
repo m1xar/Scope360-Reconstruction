@@ -1,9 +1,11 @@
 package reconstructor
 
-import "hyperliquid-trade-reconstructor/internal/hyperliquid"
+import (
+	"hyperliquid-trade-reconstructor/internal/hyperliquid/models"
+)
 
 func ReconstructTrades(
-	fills []hyperliquid.RawFill,
+	fills []models.RawFill,
 	orderIdx OrderIndex,
 	out chan<- TradeEnvelope,
 ) {
@@ -20,7 +22,7 @@ func ReconstructTrades(
 		side := sideFromDir(f.Dir)
 		size := mustFloat(f.Sz)
 
-		recon := []hyperliquid.RawFill{f}
+		recon := []models.RawFill{f}
 		usedFills[f.Tid] = struct{}{}
 
 		for j := i + 1; j < len(fills); j++ {
@@ -44,7 +46,7 @@ func ReconstructTrades(
 			usedFills[n.Tid] = struct{}{}
 
 			if size == 0 {
-				cp := make([]hyperliquid.RawFill, len(recon))
+				cp := make([]models.RawFill, len(recon))
 				copy(cp, recon)
 
 				var sl, tp *float64

@@ -1,8 +1,5 @@
-package hyperliquid
+package models
 
-import "net/http"
-
-// Это именно то, что лежит в children
 type ChildOrder struct {
 	Coin             string       `json:"coin"`
 	Side             string       `json:"side"`
@@ -13,7 +10,7 @@ type ChildOrder struct {
 	TriggerCondition string       `json:"triggerCondition"`
 	IsTrigger        bool         `json:"isTrigger"`
 	TriggerPx        string       `json:"triggerPx"`
-	Children         []ChildOrder `json:"children"` // HL реально допускает вложенность
+	Children         []ChildOrder `json:"children"`
 	IsPositionTpsl   bool         `json:"isPositionTpsl"`
 	ReduceOnly       bool         `json:"reduceOnly"`
 	OrderType        string       `json:"orderType"`
@@ -30,17 +27,8 @@ type HistoricalOrder struct {
 		Timestamp int64        `json:"timestamp"`
 		OrderType string       `json:"orderType"`
 		TriggerPx string       `json:"triggerPx"`
-		Children  []ChildOrder `json:"children"` // ← ВОТ ЭТО КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ
+		Children  []ChildOrder `json:"children"`
 	} `json:"order"`
 	Status          string `json:"status"`
 	StatusTimestamp int64  `json:"statusTimestamp"`
-}
-
-func FetchHistoricalOrders(client *http.Client, endpoint, user string) ([]HistoricalOrder, error) {
-	var out []HistoricalOrder
-	err := doRequest(client, endpoint, map[string]any{
-		"type": "historicalOrders",
-		"user": user,
-	}, &out)
-	return out, err
 }

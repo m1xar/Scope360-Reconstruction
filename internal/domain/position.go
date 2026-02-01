@@ -6,7 +6,22 @@ import (
 	"github.com/google/uuid"
 )
 
-type Order struct{}
+type Order struct {
+	ID                uuid.UUID
+	PositionID        uuid.UUID
+	ExchangeOrderID   string
+	Type              string
+	OriginalOrderType string
+	Status            string
+	Side              string
+	Reduce            bool
+	Amount            float64
+	AmountFilled      float64
+	AveragePrice      float64
+	StopPrice         float64
+	OriginalPrice     float64
+	UpdatedAt         time.Time
+}
 type JSONMap map[string]any
 
 type Position struct {

@@ -1,21 +1,24 @@
-package hyperliquid
+package executors
 
-import "net/http"
+import (
+	"hyperliquid-trade-reconstructor/internal/hyperliquid/models"
+	"net/http"
+)
 
 type fillKey struct {
 	Time int64
 	Tid  int64
 }
 
-func FetchAllFills(client *http.Client, endpoint, user string) ([]RawFill, error) {
+func FetchAllFills(client *http.Client, endpoint, user string) ([]models.RawFill, error) {
 	var (
 		startTime int64
-		result    []RawFill
+		result    []models.RawFill
 		seen      = make(map[fillKey]struct{})
 	)
 
 	for {
-		var page []RawFill
+		var page []models.RawFill
 
 		err := doRequest(client, endpoint, map[string]any{
 			"type":            "userFillsByTime",

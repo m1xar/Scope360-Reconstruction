@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
+	"hyperliquid-trade-reconstructor/internal/hyperliquid/executors"
 	"net/http"
 
 	"hyperliquid-trade-reconstructor/internal/domain"
-	"hyperliquid-trade-reconstructor/internal/hyperliquid"
 	"hyperliquid-trade-reconstructor/internal/reconstructor"
 )
 
@@ -14,12 +14,12 @@ func main() {
 	endpoint := "https://api.hyperliquid.xyz/info"
 	user := "0x5B7E4Dc30a929C577F5C0DC1fB8D3069966675d8"
 
-	fills, err := hyperliquid.FetchAllFills(client, endpoint, user)
+	fills, err := executors.FetchAllFills(client, endpoint, user)
 	if err != nil {
 		panic(err)
 	}
 
-	orders, err := hyperliquid.FetchHistoricalOrders(client, endpoint, user)
+	orders, err := executors.FetchHistoricalOrders(client, endpoint, user)
 	if err != nil {
 		panic(err)
 	}

@@ -1,9 +1,11 @@
 package reconstructor
 
-import "hyperliquid-trade-reconstructor/internal/hyperliquid"
+import (
+	"hyperliquid-trade-reconstructor/internal/hyperliquid/models"
+)
 
 type TradeEnvelope struct {
-	Fills      []hyperliquid.RawFill
+	Fills      []models.RawFill
 	StopLoss   *float64
 	TakeProfit *float64
 }
