@@ -2,13 +2,14 @@ package reconstructor
 
 import (
 	"hyperliquid-trade-reconstructor/internal/domain"
-	"hyperliquid-trade-reconstructor/internal/hyperliquid"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-func BuildPositionFromFills(fills []hyperliquid.RawFill) domain.Position {
+func BuildPositionFromEnvelope(env TradeEnvelope) domain.Position {
+	fills := env.Fills
+
 	first := fills[0]
 	last := fills[len(fills)-1]
 
@@ -46,9 +47,8 @@ func BuildPositionFromFills(fills []hyperliquid.RawFill) domain.Position {
 		Pnl:        pnl,
 		NetPnl:     net,
 		Commission: fee,
-		Funding:    0,
-		MAE:        0,
-		MFE:        0,
+		TP:         env.TakeProfit,
+		SL:         env.StopLoss,
 		Isolated:   true,
 		Closed:     true,
 		Status:     &status,

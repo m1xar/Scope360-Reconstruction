@@ -2,16 +2,17 @@ package reconstructor
 
 import "hyperliquid-trade-reconstructor/internal/hyperliquid"
 
-func ReconstructTrades(fills []hyperliquid.RawFill, out chan<- []hyperliquid.RawFill) {
+func ReconstructTrades(
+	fills []hyperliquid.RawFill,
+	orderIdx OrderIndex,
+	out chan<- TradeEnvelope,
+) {
 	usedFills := make(map[int64]struct{})
 
 	for i := 0; i < len(fills); i++ {
 		f := fills[i]
 
-		if _, ok := usedFills[f.Tid]; ok {
-			continue
-		}
-		if !isOpen(f.Dir) {
+		if _, ok := usedFills[f.Tid]; ok || !isOpen(f.Dir) {
 			continue
 		}
 
@@ -25,13 +26,9 @@ func ReconstructTrades(fills []hyperliquid.RawFill, out chan<- []hyperliquid.Raw
 		for j := i + 1; j < len(fills); j++ {
 			n := fills[j]
 
-			if _, ok := usedFills[n.Tid]; ok {
-				continue
-			}
-			if n.Coin != symbol {
-				continue
-			}
-			if sideFromDir(n.Dir) != side {
+			if _, ok := usedFills[n.Tid]; ok ||
+				n.Coin != symbol ||
+				sideFromDir(n.Dir) != side {
 				continue
 			}
 
@@ -49,7 +46,17 @@ func ReconstructTrades(fills []hyperliquid.RawFill, out chan<- []hyperliquid.Raw
 			if size == 0 {
 				cp := make([]hyperliquid.RawFill, len(recon))
 				copy(cp, recon)
-				out <- cp
+
+				var sl, tp *float64
+				if ord, ok := orderIdx[f.Time]; ok {
+					sl, tp = ExtractTPSL(ord)
+				}
+
+				out <- TradeEnvelope{
+					Fills:      cp,
+					StopLoss:   sl,
+					TakeProfit: tp,
+				}
 				break
 			}
 		}
