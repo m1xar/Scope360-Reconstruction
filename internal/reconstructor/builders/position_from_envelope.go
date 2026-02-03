@@ -1,14 +1,15 @@
-package reconstructor
+package builders
 
 import (
 	"hyperliquid-trade-reconstructor/internal/domain"
+	"hyperliquid-trade-reconstructor/internal/reconstructor"
 	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-func BuildPositionFromEnvelope(env TradeEnvelope) domain.Position {
+func BuildPositionFromEnvelope(env domain.TradeEnvelope) domain.Position {
 	fills := env.Fills
 
 	first := fills[0]
@@ -21,11 +22,11 @@ func BuildPositionFromEnvelope(env TradeEnvelope) domain.Position {
 	positionId := uuid.New()
 
 	for _, f := range fills {
-		if isOpen(f.Dir) {
-			amount += mustFloat(f.Sz)
+		if reconstructor.IsOpen(f.Dir) {
+			amount += reconstructor.MustFloat(f.Sz)
 		}
-		fee += mustFloat(f.Fee)
-		pnl += mustFloat(f.ClosedPnl)
+		fee += reconstructor.MustFloat(f.Fee)
+		pnl += reconstructor.MustFloat(f.ClosedPnl)
 
 		orderType := "Sell"
 
@@ -42,17 +43,17 @@ func BuildPositionFromEnvelope(env TradeEnvelope) domain.Position {
 			Status:            "Filled",
 			Side:              orderType,
 			Reduce:            true,
-			Amount:            mustFloat(f.Sz),
-			AmountFilled:      mustFloat(f.Sz),
-			AveragePrice:      mustFloat(f.Px),
-			StopPrice:         mustFloat(f.Px),
-			OriginalPrice:     mustFloat(f.Px),
+			Amount:            reconstructor.MustFloat(f.Sz),
+			AmountFilled:      reconstructor.MustFloat(f.Sz),
+			AveragePrice:      reconstructor.MustFloat(f.Px),
+			StopPrice:         reconstructor.MustFloat(f.Px),
+			OriginalPrice:     reconstructor.MustFloat(f.Px),
 			UpdatedAt:         time.Unix(f.Time, 0),
 		})
 	}
 
-	entry := mustFloat(first.Px)
-	exit := mustFloat(last.Px)
+	entry := reconstructor.MustFloat(first.Px)
+	exit := reconstructor.MustFloat(last.Px)
 
 	start := time.UnixMilli(first.Time)
 	end := time.UnixMilli(last.Time)
@@ -67,7 +68,7 @@ func BuildPositionFromEnvelope(env TradeEnvelope) domain.Position {
 		ID:         positionId,
 		UserID:     uint64(uuid.New().ID()),
 		KeyID:      uint64(uuid.New().ID()),
-		Side:       sideFromDir(first.Dir),
+		Side:       reconstructor.SideFromDir(first.Dir),
 		Pair:       first.Coin + "/" + first.FeeToken,
 		Amount:     amount,
 		EntryPrice: entry,
@@ -84,5 +85,6 @@ func BuildPositionFromEnvelope(env TradeEnvelope) domain.Position {
 		ClosedAt:   &end,
 		Orders:     orders,
 		Editable:   domain.JSONMap{"editable": true},
+		Funding:    env.Funding,
 	}
 }

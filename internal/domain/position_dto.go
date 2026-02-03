@@ -14,6 +14,7 @@ type PositionDTO struct {
 	Commission float64
 	TP         float64
 	SL         float64
+	Funding    float64
 	Status     string
 	CreatedAt  time.Time
 	ClosedAt   *time.Time

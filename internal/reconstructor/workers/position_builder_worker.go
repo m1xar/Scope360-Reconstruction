@@ -1,12 +1,13 @@
-package reconstructor
+package workers
 
 import (
 	"hyperliquid-trade-reconstructor/internal/domain"
+	"hyperliquid-trade-reconstructor/internal/reconstructor/builders"
 	"sync"
 )
 
 func StartPositionBuilders(
-	in <-chan TradeEnvelope,
+	in <-chan domain.TradeEnvelope,
 	out chan<- domain.Position,
 	workers int,
 ) {
@@ -17,7 +18,7 @@ func StartPositionBuilders(
 		go func() {
 			defer wg.Done()
 			for env := range in {
-				out <- BuildPositionFromEnvelope(env)
+				out <- builders.BuildPositionFromEnvelope(env)
 			}
 		}()
 	}

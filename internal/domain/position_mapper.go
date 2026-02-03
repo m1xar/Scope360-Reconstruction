@@ -10,6 +10,7 @@ func (p Position) ToDTO() PositionDTO {
 	if p.SL != nil {
 		sl = *p.SL
 	}
+
 	if p.Status != nil {
 		status = *p.Status
 	}
@@ -26,6 +27,7 @@ func (p Position) ToDTO() PositionDTO {
 		Commission: p.Commission,
 		TP:         tp,
 		SL:         sl,
+		Funding:    p.Funding,
 		Status:     status,
 		CreatedAt:  p.CreatedAt,
 		ClosedAt:   p.ClosedAt,

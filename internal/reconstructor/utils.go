@@ -6,12 +6,12 @@ import (
 	"strings"
 )
 
-func mustFloat(s string) float64 {
+func MustFloat(s string) float64 {
 	v, _ := strconv.ParseFloat(s, 64)
 	return v
 }
 
-func isOpen(dir string) bool {
+func IsOpen(dir string) bool {
 	return dir == "Open Long" || dir == "Open Short"
 }
 
@@ -20,10 +20,10 @@ func isClose(dir string) bool {
 }
 
 func isPerpDir(dir string) bool {
-	return isOpen(dir) || isClose(dir)
+	return IsOpen(dir) || isClose(dir)
 }
 
-func sideFromDir(dir string) string {
+func SideFromDir(dir string) string {
 	if strings.Contains(dir, "Long") {
 		return "Long"
 	}
@@ -42,7 +42,7 @@ func NormalizeFills(fills []models.RawFill) []models.RawFill {
 
 func ExtractTPSL(o models.HistoricalOrder) (sl, tp *float64) {
 	for _, ch := range o.Order.Children {
-		v := mustFloat(ch.TriggerPx)
+		v := MustFloat(ch.TriggerPx)
 		if strings.Contains(ch.OrderType, "Stop") {
 			sl = &v
 		}
@@ -51,4 +51,27 @@ func ExtractTPSL(o models.HistoricalOrder) (sl, tp *float64) {
 		}
 	}
 	return
+}
+
+func extractFunding(
+	fundings []models.FundingHistoryItem,
+	coin string,
+	from, to int64,
+) float64 {
+
+	out := 0.0
+
+	for _, f := range fundings {
+		if f.Delta.Coin != coin {
+			continue
+		}
+
+		if f.Time < from || f.Time > to {
+			continue
+		}
+
+		out += MustFloat(f.Delta.USDC)
+	}
+
+	return out
 }

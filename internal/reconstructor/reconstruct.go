@@ -1,26 +1,28 @@
 package reconstructor
 
 import (
+	"hyperliquid-trade-reconstructor/internal/domain"
 	"hyperliquid-trade-reconstructor/internal/hyperliquid/models"
 )
 
 func ReconstructTrades(
 	fills []models.RawFill,
+	fundings []models.FundingHistoryItem,
 	orderIdx OrderIndex,
-	out chan<- TradeEnvelope,
+	out chan<- domain.TradeEnvelope,
 ) {
 	usedFills := make(map[int64]struct{})
 
 	for i := 0; i < len(fills); i++ {
 		f := fills[i]
 
-		if _, ok := usedFills[f.Tid]; ok || !isOpen(f.Dir) {
+		if _, ok := usedFills[f.Tid]; ok || !IsOpen(f.Dir) {
 			continue
 		}
 
 		symbol := f.Coin
-		side := sideFromDir(f.Dir)
-		size := mustFloat(f.Sz)
+		side := SideFromDir(f.Dir)
+		size := MustFloat(f.Sz)
 
 		recon := []models.RawFill{f}
 		usedFills[f.Tid] = struct{}{}
@@ -30,13 +32,13 @@ func ReconstructTrades(
 
 			if _, ok := usedFills[n.Tid]; ok ||
 				n.Coin != symbol ||
-				sideFromDir(n.Dir) != side {
+				SideFromDir(n.Dir) != side {
 				continue
 			}
 
-			sz := mustFloat(n.Sz)
+			sz := MustFloat(n.Sz)
 
-			if isOpen(n.Dir) {
+			if IsOpen(n.Dir) {
 				size += sz
 			} else if isClose(n.Dir) {
 				size -= sz
@@ -54,10 +56,11 @@ func ReconstructTrades(
 					sl, tp = ExtractTPSL(ord)
 				}
 
-				out <- TradeEnvelope{
+				out <- domain.TradeEnvelope{
 					Fills:      cp,
 					StopLoss:   sl,
 					TakeProfit: tp,
+					Funding:    extractFunding(fundings, symbol, cp[0].Time, cp[len(cp)-1].Time),
 				}
 				break
 			}
