@@ -1,9 +1,10 @@
 package executors
 
 import (
-	"hyperliquid-trade-reconstructor/internal/hyperliquid"
-	"hyperliquid-trade-reconstructor/internal/hyperliquid/models"
+	"hyperliquid-trade-reconstructor/internal/connector/hyperliquid"
+	"hyperliquid-trade-reconstructor/internal/connector/hyperliquid/models"
 	"net/http"
+	"sort"
 )
 
 type fillKey struct {
@@ -59,6 +60,13 @@ func FetchAllFills(client *http.Client, endpoint, user string) ([]models.RawFill
 
 		startTime = maxTime
 	}
+
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Time == result[j].Time {
+			return result[i].Tid < result[j].Tid
+		}
+		return result[i].Time < result[j].Time
+	})
 
 	return result, nil
 }

@@ -1,10 +1,10 @@
 package builders
 
 import (
+	"hyperliquid-trade-reconstructor/internal/connector/hyperliquid/executors"
+	"hyperliquid-trade-reconstructor/internal/connector/hyperliquid/models"
 	"hyperliquid-trade-reconstructor/internal/domain"
-	"hyperliquid-trade-reconstructor/internal/hyperliquid/executors"
-	"hyperliquid-trade-reconstructor/internal/hyperliquid/models"
-	"hyperliquid-trade-reconstructor/internal/reconstructor/helpers"
+	"hyperliquid-trade-reconstructor/internal/service/reconstructor/helpers"
 	"net/http"
 )
 

@@ -1,7 +1,7 @@
-package domain
+package models
 
 import (
-	"hyperliquid-trade-reconstructor/internal/hyperliquid/models"
+	"hyperliquid-trade-reconstructor/internal/connector/hyperliquid/models"
 )
 
 type TradeEnvelope struct {

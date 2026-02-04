@@ -1,8 +1,8 @@
 package executors
 
 import (
-	"hyperliquid-trade-reconstructor/internal/hyperliquid"
-	"hyperliquid-trade-reconstructor/internal/hyperliquid/models"
+	"hyperliquid-trade-reconstructor/internal/connector/hyperliquid"
+	"hyperliquid-trade-reconstructor/internal/connector/hyperliquid/models"
 	"net/http"
 )
 
@@ -18,18 +18,14 @@ func FetchAllFunding(
 		cur    = startTime
 	)
 
-	var page []models.FundingHistoryItem
-
 	err := hyperliquid.DoRequest(client, endpoint, map[string]any{
 		"type":      "userFunding",
 		"user":      user,
 		"startTime": cur,
-	}, &page)
+	}, &result)
 	if err != nil {
 		return nil, err
 	}
-
-	result = append(result, page...)
 
 	return result, nil
 }

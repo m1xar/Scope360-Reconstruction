@@ -2,14 +2,15 @@ package builders
 
 import (
 	"hyperliquid-trade-reconstructor/internal/domain"
-	"hyperliquid-trade-reconstructor/internal/reconstructor/helpers"
+	"hyperliquid-trade-reconstructor/internal/service/reconstructor/helpers"
+	"hyperliquid-trade-reconstructor/internal/service/reconstructor/models"
 	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-func BuildPositionFromEnvelope(env domain.TradeEnvelope) domain.Position {
+func BuildPositionFromEnvelope(env models.TradeEnvelope) domain.Position {
 	fills := env.Fills
 
 	first := fills[0]
@@ -48,7 +49,7 @@ func BuildPositionFromEnvelope(env domain.TradeEnvelope) domain.Position {
 			AveragePrice:      helpers.MustFloat(f.Px),
 			StopPrice:         helpers.MustFloat(f.Px),
 			OriginalPrice:     helpers.MustFloat(f.Px),
-			UpdatedAt:         time.Unix(f.Time, 0),
+			UpdatedAt:         time.UnixMilli(f.Time),
 		})
 	}
 

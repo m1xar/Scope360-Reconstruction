@@ -1,10 +1,11 @@
 package reconstructor
 
 import (
-	"hyperliquid-trade-reconstructor/internal/domain"
-	"hyperliquid-trade-reconstructor/internal/hyperliquid/executors"
-	"hyperliquid-trade-reconstructor/internal/hyperliquid/models"
-	"hyperliquid-trade-reconstructor/internal/reconstructor/helpers"
+	"hyperliquid-trade-reconstructor/internal/connector/hyperliquid/executors"
+	"hyperliquid-trade-reconstructor/internal/connector/hyperliquid/models"
+	"hyperliquid-trade-reconstructor/internal/service/reconstructor/helpers"
+	models2 "hyperliquid-trade-reconstructor/internal/service/reconstructor/models"
+	"math"
 	"net/http"
 	"time"
 )
@@ -15,9 +16,10 @@ func ReconstructTrades(
 	orderIdx helpers.OrderIndex,
 	client *http.Client,
 	endpoint string,
-	out chan<- domain.TradeEnvelope,
+	out chan<- models2.TradeEnvelope,
 ) {
 	usedFills := make(map[int64]struct{})
+	const sizeEpsilon = 1e-9
 
 	for i := 0; i < len(fills); i++ {
 		f := fills[i]
@@ -53,16 +55,22 @@ func ReconstructTrades(
 			recon = append(recon, n)
 			usedFills[n.Tid] = struct{}{}
 
-			if size == 0 {
+			if math.Abs(size) < sizeEpsilon {
 				cp := make([]models.RawFill, len(recon))
 				copy(cp, recon)
 
 				var sl, tp *float64
-				if ord, ok := orderIdx[f.Time]; ok {
-					sl, tp = helpers.ExtractTPSL(ord)
+				if ordersAt, ok := orderIdx[f.Time]; ok {
+					for _, ord := range ordersAt {
+						if ord.Order.Coin != symbol {
+							continue
+						}
+						sl, tp = helpers.ExtractTPSL(ord)
+						break
+					}
 				}
 
-				env := domain.TradeEnvelope{
+				env := models2.TradeEnvelope{
 					Fills:      cp,
 					StopLoss:   sl,
 					TakeProfit: tp,

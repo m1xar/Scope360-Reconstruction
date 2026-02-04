@@ -2,16 +2,15 @@ package workers
 
 import (
 	"hyperliquid-trade-reconstructor/internal/domain"
-	"hyperliquid-trade-reconstructor/internal/reconstructor/builders"
-	"net/http"
+	"hyperliquid-trade-reconstructor/internal/service/reconstructor/builders"
+	"hyperliquid-trade-reconstructor/internal/service/reconstructor/models"
 	"sync"
 )
 
 func StartPositionBuilders(
-	in <-chan domain.TradeEnvelope,
+	in <-chan models.TradeEnvelope,
 	out chan<- domain.Position,
 	workers int,
-	client *http.Client,
 ) {
 	var wg sync.WaitGroup
 

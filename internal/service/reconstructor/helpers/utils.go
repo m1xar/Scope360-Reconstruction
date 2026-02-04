@@ -2,7 +2,7 @@ package helpers
 
 import (
 	"errors"
-	"hyperliquid-trade-reconstructor/internal/hyperliquid/models"
+	"hyperliquid-trade-reconstructor/internal/connector/hyperliquid/models"
 	"strconv"
 	"strings"
 )

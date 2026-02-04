@@ -2,21 +2,21 @@ package main
 
 import (
 	"fmt"
-	"hyperliquid-trade-reconstructor/internal/hyperliquid/executors"
-	"hyperliquid-trade-reconstructor/internal/reconstructor/builders"
-	"hyperliquid-trade-reconstructor/internal/reconstructor/helpers"
-	"hyperliquid-trade-reconstructor/internal/reconstructor/workers"
+	"hyperliquid-trade-reconstructor/internal/connector/hyperliquid/executors"
+	"hyperliquid-trade-reconstructor/internal/domain"
+	"hyperliquid-trade-reconstructor/internal/service/reconstructor"
+	"hyperliquid-trade-reconstructor/internal/service/reconstructor/builders"
+	"hyperliquid-trade-reconstructor/internal/service/reconstructor/helpers"
+	"hyperliquid-trade-reconstructor/internal/service/reconstructor/models"
+	"hyperliquid-trade-reconstructor/internal/service/reconstructor/workers"
 	"net/http"
 	"time"
-
-	"hyperliquid-trade-reconstructor/internal/domain"
-	"hyperliquid-trade-reconstructor/internal/reconstructor"
 )
 
 func main() {
 	client := http.DefaultClient
 	endpoint := "https://api.hyperliquid.xyz/info"
-	user := "0x5B7E4Dc30a929C577F5C0DC1fB8D3069966675d8" //   0xbC4042D191153Bb5ca1b446C01433c261175A6eE
+	user := "0xbC4042D191153Bb5ca1b446C01433c261175A6eE" // 0x5B7E4Dc30a929C577F5C0DC1fB8D3069966675d8
 
 	testMessage := "Login nonce: 123456"
 	addr, sig, err := helpers.CreateWalletAndSign(testMessage)
@@ -46,7 +46,7 @@ func main() {
 	orderIdx := helpers.BuildOrderIndex(orders)
 	fills = helpers.NormalizeFills(fills)
 
-	envelopes := make(chan domain.TradeEnvelope)
+	envelopes := make(chan models.TradeEnvelope)
 	positions := make(chan domain.Position)
 
 	go func() {
@@ -60,7 +60,7 @@ func main() {
 		fundings = append(fundings, builders.BuildUserFunding(fund))
 	}
 
-	workers.StartPositionBuilders(envelopes, positions, 8, client)
+	workers.StartPositionBuilders(envelopes, positions, 8)
 
 	for pos := range positions {
 		dto := pos.ToDTO()
