@@ -1,4 +1,4 @@
-package executors
+package hyperliquid
 
 import (
 	"bytes"
@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-func doRequest(client *http.Client, endpoint string, payload any, out any) error {
+func DoRequest(client *http.Client, endpoint string, payload any, out any) error {
 	b, err := json.Marshal(payload)
 	if err != nil {
 		return err

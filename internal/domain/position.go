@@ -37,8 +37,8 @@ type Position struct {
 	NetPnl           float64
 	Commission       float64
 	Funding          float64
-	MAE              float64
-	MFE              float64
+	MAE              *float64
+	MFE              *float64
 	RR               *float64
 	RRPlanned        *float64
 	TP               *float64

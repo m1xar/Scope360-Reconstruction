@@ -1,7 +1,7 @@
 package domain
 
 func (p Position) ToDTO() PositionDTO {
-	var tp, sl float64
+	var tp, sl, mae, mfe float64
 	var status string
 
 	if p.TP != nil {
@@ -9,6 +9,12 @@ func (p Position) ToDTO() PositionDTO {
 	}
 	if p.SL != nil {
 		sl = *p.SL
+	}
+	if p.MAE != nil {
+		mae = *p.MAE
+	}
+	if p.MFE != nil {
+		mfe = *p.MFE
 	}
 
 	if p.Status != nil {
@@ -25,6 +31,8 @@ func (p Position) ToDTO() PositionDTO {
 		Pnl:        p.Pnl,
 		NetPnl:     p.NetPnl,
 		Commission: p.Commission,
+		MAE:        mae,
+		MFE:        mfe,
 		TP:         tp,
 		SL:         sl,
 		Funding:    p.Funding,

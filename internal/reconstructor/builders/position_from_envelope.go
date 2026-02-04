@@ -2,7 +2,7 @@ package builders
 
 import (
 	"hyperliquid-trade-reconstructor/internal/domain"
-	"hyperliquid-trade-reconstructor/internal/reconstructor"
+	"hyperliquid-trade-reconstructor/internal/reconstructor/helpers"
 	"strconv"
 	"time"
 
@@ -22,11 +22,11 @@ func BuildPositionFromEnvelope(env domain.TradeEnvelope) domain.Position {
 	positionId := uuid.New()
 
 	for _, f := range fills {
-		if reconstructor.IsOpen(f.Dir) {
-			amount += reconstructor.MustFloat(f.Sz)
+		if helpers.IsOpen(f.Dir) {
+			amount += helpers.MustFloat(f.Sz)
 		}
-		fee += reconstructor.MustFloat(f.Fee)
-		pnl += reconstructor.MustFloat(f.ClosedPnl)
+		fee += helpers.MustFloat(f.Fee)
+		pnl += helpers.MustFloat(f.ClosedPnl)
 
 		orderType := "Sell"
 
@@ -43,32 +43,51 @@ func BuildPositionFromEnvelope(env domain.TradeEnvelope) domain.Position {
 			Status:            "Filled",
 			Side:              orderType,
 			Reduce:            true,
-			Amount:            reconstructor.MustFloat(f.Sz),
-			AmountFilled:      reconstructor.MustFloat(f.Sz),
-			AveragePrice:      reconstructor.MustFloat(f.Px),
-			StopPrice:         reconstructor.MustFloat(f.Px),
-			OriginalPrice:     reconstructor.MustFloat(f.Px),
+			Amount:            helpers.MustFloat(f.Sz),
+			AmountFilled:      helpers.MustFloat(f.Sz),
+			AveragePrice:      helpers.MustFloat(f.Px),
+			StopPrice:         helpers.MustFloat(f.Px),
+			OriginalPrice:     helpers.MustFloat(f.Px),
 			UpdatedAt:         time.Unix(f.Time, 0),
 		})
 	}
 
-	entry := reconstructor.MustFloat(first.Px)
-	exit := reconstructor.MustFloat(last.Px)
+	entry := helpers.MustFloat(first.Px)
+	exit := helpers.MustFloat(last.Px)
 
 	start := time.UnixMilli(first.Time)
 	end := time.UnixMilli(last.Time)
 
-	net := pnl - fee
+	net := pnl - fee + env.Funding
 	status := "Loss"
 	if net > 0 {
 		status = "Win"
+	}
+
+	side := helpers.SideFromDir(first.Dir)
+
+	var mae, mfe *float64
+	if env.High != nil && env.Low != nil {
+		if side == "Long" {
+			maeVal := (*env.Low - entry) * amount
+			mfeVal := (*env.High - entry) * amount
+			mae = &maeVal
+			mfe = &mfeVal
+		}
+		if side == "Short" {
+			maeVal := (entry - *env.High) * amount
+			mfeVal := (entry - *env.Low) * amount
+			mae = &maeVal
+			mfe = &mfeVal
+		}
+
 	}
 
 	return domain.Position{
 		ID:         positionId,
 		UserID:     uint64(uuid.New().ID()),
 		KeyID:      uint64(uuid.New().ID()),
-		Side:       reconstructor.SideFromDir(first.Dir),
+		Side:       side,
 		Pair:       first.Coin + "/" + first.FeeToken,
 		Amount:     amount,
 		EntryPrice: entry,
@@ -76,6 +95,8 @@ func BuildPositionFromEnvelope(env domain.TradeEnvelope) domain.Position {
 		Pnl:        pnl,
 		NetPnl:     net,
 		Commission: fee,
+		MAE:        mae,
+		MFE:        mfe,
 		TP:         env.TakeProfit,
 		SL:         env.StopLoss,
 		Isolated:   true,

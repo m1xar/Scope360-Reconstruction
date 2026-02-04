@@ -1,4 +1,4 @@
-package reconstructor
+package helpers
 
 import (
 	"hyperliquid-trade-reconstructor/internal/hyperliquid/models"

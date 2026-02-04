@@ -1,6 +1,7 @@
 package executors
 
 import (
+	"hyperliquid-trade-reconstructor/internal/hyperliquid"
 	"hyperliquid-trade-reconstructor/internal/hyperliquid/models"
 	"net/http"
 )
@@ -20,7 +21,7 @@ func FetchAllFills(client *http.Client, endpoint, user string) ([]models.RawFill
 	for {
 		var page []models.RawFill
 
-		err := doRequest(client, endpoint, map[string]any{
+		err := hyperliquid.DoRequest(client, endpoint, map[string]any{
 			"type":            "userFillsByTime",
 			"user":            user,
 			"startTime":       startTime,

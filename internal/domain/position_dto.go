@@ -12,6 +12,8 @@ type PositionDTO struct {
 	Pnl        float64
 	NetPnl     float64
 	Commission float64
+	MAE        float64
+	MFE        float64
 	TP         float64
 	SL         float64
 	Funding    float64
