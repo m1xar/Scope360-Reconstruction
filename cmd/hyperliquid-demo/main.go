@@ -10,13 +10,12 @@ import (
 	"hyperliquid-trade-reconstructor/internal/service/reconstructor/models"
 	"hyperliquid-trade-reconstructor/internal/service/reconstructor/workers"
 	"net/http"
-	"time"
 )
 
 func main() {
 	client := http.DefaultClient
 	endpoint := "https://api.hyperliquid.xyz/info"
-	user := "0xbC4042D191153Bb5ca1b446C01433c261175A6eE" // 0x5B7E4Dc30a929C577F5C0DC1fB8D3069966675d8
+	user := "0x5B7E4Dc30a929C577F5C0DC1fB8D3069966675d8" // 0x5B7E4Dc30a929C577F5C0DC1fB8D3069966675d8  0xbC4042D191153Bb5ca1b446C01433c261175A6eE
 
 	testMessage := "Login nonce: 123456"
 	addr, sig, err := helpers.CreateWalletAndSign(testMessage)
@@ -38,7 +37,17 @@ func main() {
 		panic(err)
 	}
 
-	raw_fundings, err := executors.FetchAllFunding(client, endpoint, user, 0)
+	rawFundings, err := executors.FetchAllFunding(client, endpoint, user, 0)
+	if err != nil {
+		panic(err)
+	}
+
+	rawPortfolio, err := executors.FetchPortfolioState(client, endpoint, user)
+	if err != nil {
+		panic(err)
+	}
+
+	portfolio, err := helpers.NormalizePortfolio(rawPortfolio)
 	if err != nil {
 		panic(err)
 	}
@@ -47,22 +56,31 @@ func main() {
 	fills = helpers.NormalizeFills(fills)
 
 	envelopes := make(chan models.TradeEnvelope)
-	positions := make(chan domain.Position)
+	positionsCh := make(chan domain.Position)
 
 	go func() {
-		reconstructor.ReconstructTrades(fills, raw_fundings, orderIdx, client, endpoint, envelopes)
+		reconstructor.ReconstructTrades(fills, rawFundings, orderIdx, client, endpoint, envelopes)
 		close(envelopes)
 	}()
 
 	fundings := []domain.UserFunding{}
 
-	for _, fund := range raw_fundings {
+	for _, fund := range rawFundings {
 		fundings = append(fundings, builders.BuildUserFunding(fund))
 	}
 
-	workers.StartPositionBuilders(envelopes, positions, 8)
+	balancesnapshots := builders.BuildUserBalanceSnapshotsFromPortfolio(portfolio)
 
-	for pos := range positions {
+	workers.StartPositionBuilders(envelopes, positionsCh, 8)
+
+	positionList := make([]domain.Position, 0)
+	for pos := range positionsCh {
+		positionList = append(positionList, pos)
+	}
+
+	builders.AttachBalanceInitToPositions(&positionList, balancesnapshots)
+
+	for _, pos := range positionList {
 		dto := pos.ToDTO()
 		fmt.Printf("TRADE %+v\n", dto)
 		for _, order := range pos.Orders {
@@ -75,24 +93,21 @@ func main() {
 		fmt.Printf("FUNDING %+v\n", fund)
 	}
 
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
+	for _, snap := range balancesnapshots {
+		fmt.Printf("BALANCE SNAPSHOT %+v\n", snap)
+	}
 
-	for range ticker.C {
-		state, err := executors.FetchClearinghouseState(client, endpoint, user)
-		if err != nil {
-			fmt.Printf("CLEARINGHOUSE ERR %v\n", err)
-			continue
-		}
+	state, err := executors.FetchClearinghouseState(client, endpoint, user)
+	if err != nil {
+		fmt.Printf("CLEARINGHOUSE ERR %v\n", err)
+	}
 
-		openPositions, err := builders.BuildOpenPositionsFromClearinghouse(state, client, endpoint)
-		if err != nil {
-			fmt.Printf("Building Position Error %v\n", err)
-			continue
-		}
+	openPositions, err := builders.BuildOpenPositionsFromClearinghouse(state, client, endpoint)
+	if err != nil {
+		fmt.Printf("Building Position Error %v\n", err)
+	}
 
-		for _, pos := range openPositions {
-			fmt.Printf("OPEN POSITION %+v\n", pos)
-		}
+	for _, pos := range openPositions {
+		fmt.Printf("OPEN POSITION %+v\n", pos)
 	}
 }

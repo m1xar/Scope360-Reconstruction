@@ -1,6 +1,7 @@
 package helpers
 
 import (
+	"encoding/json"
 	"errors"
 	"hyperliquid-trade-reconstructor/internal/connector/hyperliquid/models"
 	"strconv"
@@ -130,4 +131,72 @@ func GetHighLowHyperliquid(candles []models.HyperliquidCandle) (high, low *float
 	}
 
 	return &h, &l
+}
+
+func NormalizePortfolio(raw models.RawPortfolioResponse) (models.PortfolioResponse, error) {
+	var result models.PortfolioResponse
+
+	for _, entry := range raw {
+		if len(entry) != 2 {
+			continue
+		}
+
+		var period string
+		if err := json.Unmarshal(entry[0], &period); err != nil {
+			return nil, err
+		}
+
+		var rawData models.RawPeriodData
+		if err := json.Unmarshal(entry[1], &rawData); err != nil {
+			return nil, err
+		}
+
+		accountHistory, err := normalizeHistory(rawData.AccountValueHistory)
+		if err != nil {
+			return nil, err
+		}
+
+		pnlHistory, err := normalizeHistory(rawData.PnlHistory)
+		if err != nil {
+			return nil, err
+		}
+
+		result = append(result, models.PeriodEntry{
+			Period: period,
+			Data: models.PeriodData{
+				AccountValueHistory: accountHistory,
+				PnlHistory:          pnlHistory,
+				Vlm:                 rawData.Vlm,
+			},
+		})
+	}
+
+	return result, nil
+}
+
+func normalizeHistory(raw [][]json.RawMessage) ([]models.HistoryPoint, error) {
+	points := make([]models.HistoryPoint, 0, len(raw))
+
+	for _, item := range raw {
+		if len(item) != 2 {
+			continue
+		}
+
+		var ts int64
+		if err := json.Unmarshal(item[0], &ts); err != nil {
+			return nil, err
+		}
+
+		var val string
+		if err := json.Unmarshal(item[1], &val); err != nil {
+			return nil, err
+		}
+
+		points = append(points, models.HistoryPoint{
+			Timestamp: ts,
+			Value:     val,
+		})
+	}
+
+	return points, nil
 }
