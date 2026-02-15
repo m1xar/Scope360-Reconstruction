@@ -5,6 +5,7 @@ import (
 	"hyperliquid-trade-reconstructor/internal/connector/hyperliquid/models"
 	"hyperliquid-trade-reconstructor/internal/domain"
 	"hyperliquid-trade-reconstructor/internal/service/reconstructor/helpers"
+	"math"
 	"net/http"
 )
 
@@ -36,13 +37,13 @@ func BuildOpenPositionsFromClearinghouse(
 		liq := helpers.MustFloat(pos.LiquidationPx)
 
 		out = append(out, domain.OpenPosition{
-			Pair:             pos.Coin + "/USDC",
-			Amount:           size,
-			Leverage:         pos.Leverage.Value,
-			EntryPrice:       entry,
-			Pnl:              pnl,
-			LiquidationPrice: liq,
-			CurrentPrice:     coinPrice[pos.Coin],
+			Pair:             pos.Coin + "USDC",
+			Amount:           math.Abs(helpers.Round8(size)),
+			Leverage:         helpers.Round8(pos.Leverage.Value),
+			EntryPrice:       helpers.Round8(entry),
+			Pnl:              helpers.Round8(pnl),
+			LiquidationPrice: helpers.Round8(liq),
+			CurrentPrice:     helpers.Round8(coinPrice[pos.Coin]),
 		})
 	}
 

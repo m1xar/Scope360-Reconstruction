@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"hyperliquid-trade-reconstructor/internal/connector/hyperliquid/models"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -27,9 +28,9 @@ func isPerpDir(dir string) bool {
 
 func SideFromDir(dir string) string {
 	if strings.Contains(dir, "Long") {
-		return "Long"
+		return "LONG"
 	}
-	return "Short"
+	return "SHORT"
 }
 
 func NormalizeFills(fills []models.RawFill) []models.RawFill {
@@ -44,7 +45,7 @@ func NormalizeFills(fills []models.RawFill) []models.RawFill {
 
 func ExtractTPSL(o models.HistoricalOrder) (sl, tp *float64) {
 	for _, ch := range o.Order.Children {
-		v := MustFloat(ch.TriggerPx)
+		v := Round8(MustFloat(ch.TriggerPx))
 		if strings.Contains(ch.OrderType, "Stop") {
 			sl = &v
 		}
@@ -199,4 +200,8 @@ func normalizeHistory(raw [][]json.RawMessage) ([]models.HistoryPoint, error) {
 	}
 
 	return points, nil
+}
+
+func Round8(val float64) float64 {
+	return math.Round(val*1e8) / 1e8
 }

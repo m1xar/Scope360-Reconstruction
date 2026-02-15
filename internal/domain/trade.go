@@ -7,7 +7,6 @@ import (
 )
 
 type Trade struct {
-	ID         uint64
 	OrderID    uuid.UUID
 	Side       string
 	Price      float64

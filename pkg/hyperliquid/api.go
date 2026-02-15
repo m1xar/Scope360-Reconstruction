@@ -17,34 +17,34 @@ func GetBuiltPositions(
 	client *http.Client,
 	endpoint string,
 	user string,
-) ([]domain.Position, error) {
+) ([]domain.Position, []domain.Trade, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
 
 	fills, err := executors.FetchAllFills(client, endpoint, user)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	orders, err := executors.FetchHistoricalOrders(client, endpoint, user)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	rawFundings, err := executors.FetchAllFunding(client, endpoint, user, 0)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	rawPortfolio, err := executors.FetchPortfolioState(client, endpoint, user)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	portfolio, err := helpers.NormalizePortfolio(rawPortfolio)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	orderIdx := helpers.BuildOrderIndex(orders)
@@ -67,8 +67,9 @@ func GetBuiltPositions(
 
 	balanceSnapshots := builders.BuildUserBalanceSnapshotsFromPortfolio(portfolio)
 	builders.AttachBalanceInitToPositions(&positions, balanceSnapshots)
+	trades := builders.TradesFromPositions(positions)
 
-	return positions, nil
+	return positions, trades, nil
 }
 
 func GetFundings(

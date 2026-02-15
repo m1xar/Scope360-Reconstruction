@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func BuildPositionFromEnvelope(env models.TradeEnvelope) domain.Position {
+func BuildPositionFromEnvelope(env models.TradeEnvelope) (domain.Position, error) {
 	fills := env.Fills
 
 	first := fills[0]
@@ -20,7 +20,15 @@ func BuildPositionFromEnvelope(env models.TradeEnvelope) domain.Position {
 
 	var orders []domain.Order
 
-	positionId := uuid.New()
+	newID, err := uuid.NewV7()
+	if err != nil {
+		return domain.Position{}, err
+	}
+
+	newPositionID, err := uuid.NewV7()
+	if err != nil {
+		return domain.Position{}, err
+	}
 
 	for _, f := range fills {
 		if helpers.IsOpen(f.Dir) {
@@ -36,28 +44,28 @@ func BuildPositionFromEnvelope(env models.TradeEnvelope) domain.Position {
 		}
 
 		orders = append(orders, domain.Order{
-			ID:                uuid.New(),
-			PositionID:        positionId,
+			ID:                newID,
+			PositionID:        newPositionID,
 			ExchangeOrderID:   strconv.FormatInt(f.Tid, 10),
 			Type:              orderType,
 			OriginalOrderType: orderType,
 			Status:            "Filled",
 			Side:              orderType,
 			Reduce:            true,
-			Amount:            helpers.MustFloat(f.Sz),
-			AmountFilled:      helpers.MustFloat(f.Sz),
-			AveragePrice:      helpers.MustFloat(f.Px),
-			StopPrice:         helpers.MustFloat(f.Px),
-			OriginalPrice:     helpers.MustFloat(f.Px),
-			UpdatedAt:         time.UnixMilli(f.Time),
+			Amount:            helpers.Round8(helpers.MustFloat(f.Sz)),
+			AmountFilled:      helpers.Round8(helpers.MustFloat(f.Sz)),
+			AveragePrice:      helpers.Round8(helpers.MustFloat(f.Px)),
+			StopPrice:         helpers.Round8(helpers.MustFloat(f.Px)),
+			OriginalPrice:     helpers.Round8(helpers.MustFloat(f.Px)),
+			UpdatedAt:         time.UnixMilli(f.Time).UTC(),
 		})
 	}
 
 	entry := helpers.MustFloat(first.Px)
 	exit := helpers.MustFloat(last.Px)
 
-	start := time.UnixMilli(first.Time)
-	end := time.UnixMilli(last.Time)
+	start := time.UnixMilli(first.Time).UTC()
+	end := time.UnixMilli(last.Time).UTC()
 
 	net := pnl - fee + env.Funding
 	status := "Loss"
@@ -70,14 +78,14 @@ func BuildPositionFromEnvelope(env models.TradeEnvelope) domain.Position {
 	var mae, mfe *float64
 	if env.High != nil && env.Low != nil {
 		if side == "Long" {
-			maeVal := (*env.Low - entry) * amount
-			mfeVal := (*env.High - entry) * amount
+			maeVal := helpers.Round8((*env.Low - entry) * amount)
+			mfeVal := helpers.Round8((*env.High - entry) * amount)
 			mae = &maeVal
 			mfe = &mfeVal
 		}
 		if side == "Short" {
-			maeVal := (entry - *env.High) * amount
-			mfeVal := (entry - *env.Low) * amount
+			maeVal := helpers.Round8((entry - *env.High) * amount)
+			mfeVal := helpers.Round8((entry - *env.Low) * amount)
 			mae = &maeVal
 			mfe = &mfeVal
 		}
@@ -85,17 +93,15 @@ func BuildPositionFromEnvelope(env models.TradeEnvelope) domain.Position {
 	}
 
 	return domain.Position{
-		ID:         positionId,
-		UserID:     uint64(uuid.New().ID()),
-		KeyID:      uint64(uuid.New().ID()),
+		ID:         newPositionID,
 		Side:       side,
-		Pair:       first.Coin + "/" + first.FeeToken,
-		Amount:     amount,
-		EntryPrice: entry,
-		ExitPrice:  exit,
-		Pnl:        pnl,
-		NetPnl:     net,
-		Commission: fee,
+		Pair:       first.Coin + first.FeeToken,
+		Amount:     helpers.Round8(amount),
+		EntryPrice: helpers.Round8(entry),
+		ExitPrice:  helpers.Round8(exit),
+		Pnl:        helpers.Round8(pnl),
+		NetPnl:     helpers.Round8(net),
+		Commission: helpers.Round8(fee),
 		MAE:        mae,
 		MFE:        mfe,
 		TP:         env.TakeProfit,
@@ -106,7 +112,6 @@ func BuildPositionFromEnvelope(env models.TradeEnvelope) domain.Position {
 		CreatedAt:  start,
 		ClosedAt:   &end,
 		Orders:     orders,
-		Editable:   domain.JSONMap{"editable": true},
-		Funding:    env.Funding,
-	}
+		Funding:    helpers.Round8(env.Funding),
+	}, nil
 }

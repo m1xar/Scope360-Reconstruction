@@ -19,7 +19,11 @@ func StartPositionBuilders(
 		go func() {
 			defer wg.Done()
 			for env := range in {
-				out <- builders.BuildPositionFromEnvelope(env)
+				pos, err := builders.BuildPositionFromEnvelope(env)
+				if err != nil {
+					continue
+				}
+				out <- pos
 			}
 		}()
 	}

@@ -22,12 +22,9 @@ type Order struct {
 	OriginalPrice     float64
 	UpdatedAt         time.Time
 }
-type JSONMap map[string]any
 
 type Position struct {
 	ID               uuid.UUID
-	UserID           uint64
-	KeyID            uint64
 	Side             string
 	Pair             string
 	Amount           float64
@@ -51,6 +48,5 @@ type Position struct {
 	CreatedAt        time.Time
 	ClosedAt         *time.Time
 	Orders           []Order
-	Editable         JSONMap
 	BalanceInit      float64
 }

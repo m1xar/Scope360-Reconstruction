@@ -2,6 +2,7 @@ package builders
 
 import (
 	"hyperliquid-trade-reconstructor/internal/domain"
+	"hyperliquid-trade-reconstructor/internal/service/reconstructor/helpers"
 	"sort"
 	"time"
 )
@@ -21,18 +22,18 @@ func AttachBalanceInitToPositions(
 		return sorted[i].CreatedAt.Before(sorted[j].CreatedAt)
 	})
 
-	for i := range *positions {
+	for i := range *positions { //логика со слепой зоной в виде дырявых снепшотов с хл начинающися после первых поз
 		pos := &(*positions)[i]
 		idx := lastSnapshotBefore(sorted, pos.CreatedAt)
 
 		if idx >= 0 {
-			pos.BalanceInit = sorted[idx].Balance
+			pos.BalanceInit = helpers.Round8(sorted[idx].Balance)
 			continue
 		}
 		if !pos.ClosedAt.IsZero() {
 			idx = firstSnapshotAfter(sorted, *pos.ClosedAt)
 			if idx >= 0 {
-				pos.BalanceInit = sorted[idx].Balance - pos.NetPnl
+				pos.BalanceInit = helpers.Round8(sorted[idx].Balance - pos.NetPnl)
 			}
 		}
 	}

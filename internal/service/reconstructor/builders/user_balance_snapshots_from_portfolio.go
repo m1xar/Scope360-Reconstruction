@@ -15,10 +15,8 @@ func BuildUserBalanceSnapshotsFromPortfolio(resp models.PortfolioResponse) []dom
 	for _, point := range history {
 		out = append(out, domain.UserBalanceSnapshot{
 			ResourceID: 0,
-			UserID:     0,
-			KeyID:      0,
-			CreatedAt:  time.UnixMilli(point.Timestamp),
-			Balance:    helpers.MustFloat(point.Value),
+			CreatedAt:  time.UnixMilli(point.Timestamp).UTC(),
+			Balance:    helpers.Round8(helpers.MustFloat(point.Value)),
 		})
 	}
 
