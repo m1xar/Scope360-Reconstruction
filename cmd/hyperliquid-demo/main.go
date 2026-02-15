@@ -20,7 +20,7 @@ func main() {
 	}
 	_ = sig
 
-	positionList, trades, err := hyperliquid.GetBuiltPositions(client, endpoint, user)
+	positionList, trades, balanceSnapshots, err := hyperliquid.GetBuiltPositions(client, endpoint, user)
 	if err != nil {
 		panic(err)
 	}
@@ -30,10 +30,10 @@ func main() {
 		panic(err)
 	}
 
-	balanceSnapshots, err := hyperliquid.GetBalanceSnapshots(client, endpoint, user)
-	if err != nil {
-		panic(err)
-	}
+	//balanceSnapshots, err := hyperliquid.GetBalanceSnapshots(client, endpoint, user)
+	//if err != nil {
+	//	panic(err)
+	//}
 
 	openPositions, err := hyperliquid.GetOpenPositions(client, endpoint, user)
 	if err != nil {
@@ -41,8 +41,7 @@ func main() {
 	}
 
 	for _, pos := range positionList {
-		dto := pos.ToDTO()
-		fmt.Printf("TRADE %+v\n", dto)
+		fmt.Printf("TRADE %+v\n", pos)
 		for _, order := range pos.Orders {
 			fmt.Printf("Order %+v\n", order)
 		}

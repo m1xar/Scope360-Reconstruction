@@ -11,4 +11,5 @@ type TradeEnvelope struct {
 	StopLoss   *float64
 	TakeProfit *float64
 	Funding    float64
+	FillTypes  map[int64]string
 }

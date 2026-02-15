@@ -9,6 +9,7 @@ import (
 	"hyperliquid-trade-reconstructor/internal/service/reconstructor/models"
 	"hyperliquid-trade-reconstructor/internal/service/reconstructor/workers"
 	"net/http"
+	"sort"
 )
 
 const defaultPositionWorkers = 8
@@ -17,34 +18,34 @@ func GetBuiltPositions(
 	client *http.Client,
 	endpoint string,
 	user string,
-) ([]domain.Position, []domain.Trade, error) {
+) ([]domain.Position, []domain.Trade, []domain.UserBalanceSnapshot, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
 
 	fills, err := executors.FetchAllFills(client, endpoint, user)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	orders, err := executors.FetchHistoricalOrders(client, endpoint, user)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	rawFundings, err := executors.FetchAllFunding(client, endpoint, user, 0)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	rawPortfolio, err := executors.FetchPortfolioState(client, endpoint, user)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	portfolio, err := helpers.NormalizePortfolio(rawPortfolio)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	orderIdx := helpers.BuildOrderIndex(orders)
@@ -65,11 +66,15 @@ func GetBuiltPositions(
 		positions = append(positions, pos)
 	}
 
+	sort.Slice(positions, func(i, j int) bool {
+		return positions[i].ClosedAt.Before(*positions[j].ClosedAt)
+	})
+
 	balanceSnapshots := builders.BuildUserBalanceSnapshotsFromPortfolio(portfolio)
-	builders.AttachBalanceInitToPositions(&positions, balanceSnapshots)
+	builders.AttachBalanceInitToPositions(&positions, &balanceSnapshots)
 	trades := builders.TradesFromPositions(positions)
 
-	return positions, trades, nil
+	return positions, trades, balanceSnapshots, nil
 }
 
 func GetFundings(
@@ -111,7 +116,7 @@ func GetOpenPositions(
 	return builders.BuildOpenPositionsFromClearinghouse(state, client, endpoint)
 }
 
-func GetBalanceSnapshots(
+func GetBalanceSnapshots( //убрал вызовы, уточнить по валидности
 	client *http.Client,
 	endpoint string,
 	user string,

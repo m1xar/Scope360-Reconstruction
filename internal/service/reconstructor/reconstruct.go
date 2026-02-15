@@ -7,6 +7,7 @@ import (
 	models2 "hyperliquid-trade-reconstructor/internal/service/reconstructor/models"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -62,11 +63,35 @@ func ReconstructTrades(
 				var sl, tp *float64
 				if ordersAt, ok := orderIdx[f.Time]; ok {
 					for _, ord := range ordersAt {
-						if ord.Order.Coin != symbol {
+						if ord.Order.Coin != symbol || len(ord.Order.Children) == 0 {
 							continue
 						}
 						sl, tp = helpers.ExtractTPSL(ord)
 						break
+					}
+				}
+
+				fillTypes := make(map[int64]string, len(cp))
+				for _, fl := range cp {
+					if ordersAt, ok := orderIdx[fl.Time]; ok {
+						fillTypes[fl.Tid] = "MARKET"
+						for _, ord := range ordersAt {
+							if ord.Order.Coin != symbol {
+								continue
+							}
+							ot := strings.ToLower(ord.Order.OrderType)
+
+							switch {
+							case strings.Contains(ot, "market"):
+								fillTypes[fl.Tid] = "MARKET"
+							case strings.Contains(ot, "limit"):
+								fillTypes[fl.Tid] = "LIMIT"
+							default:
+								fillTypes[fl.Tid] = "MARKET"
+							}
+
+							break
+						}
 					}
 				}
 
@@ -75,6 +100,7 @@ func ReconstructTrades(
 					StopLoss:   sl,
 					TakeProfit: tp,
 					Funding:    helpers.ExtractFunding(fundings, symbol, cp[0].Time, cp[len(cp)-1].Time),
+					FillTypes:  fillTypes,
 				}
 
 				const maxAgeMinutes = int64(5000)

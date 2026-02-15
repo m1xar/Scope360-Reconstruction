@@ -4,6 +4,7 @@ import (
 	"hyperliquid-trade-reconstructor/internal/domain"
 	"hyperliquid-trade-reconstructor/internal/service/reconstructor/helpers"
 	"hyperliquid-trade-reconstructor/internal/service/reconstructor/models"
+	"math"
 	"strconv"
 	"time"
 
@@ -37,20 +38,20 @@ func BuildPositionFromEnvelope(env models.TradeEnvelope) (domain.Position, error
 		fee += helpers.MustFloat(f.Fee)
 		pnl += helpers.MustFloat(f.ClosedPnl)
 
-		orderType := "Sell"
+		side := "SELL"
 
 		if f.Side == "B" {
-			orderType = "Buy"
+			side = "BUY"
 		}
 
 		orders = append(orders, domain.Order{
 			ID:                newID,
 			PositionID:        newPositionID,
 			ExchangeOrderID:   strconv.FormatInt(f.Tid, 10),
-			Type:              orderType,
-			OriginalOrderType: orderType,
+			Type:              env.FillTypes[f.Tid],
+			OriginalOrderType: env.FillTypes[f.Tid],
 			Status:            "Filled",
-			Side:              orderType,
+			Side:              side,
 			Reduce:            true,
 			Amount:            helpers.Round8(helpers.MustFloat(f.Sz)),
 			AmountFilled:      helpers.Round8(helpers.MustFloat(f.Sz)),
@@ -91,6 +92,15 @@ func BuildPositionFromEnvelope(env models.TradeEnvelope) (domain.Position, error
 		}
 
 	}
+	var RR, RRPlanned *float64
+	if env.StopLoss != nil {
+		rr := (net / (math.Abs((*env.StopLoss - entry)) * amount))
+		RR = &rr
+		if env.TakeProfit != nil {
+			rrplanned := math.Abs(*env.TakeProfit-entry) / math.Abs(*env.StopLoss-entry)
+			RRPlanned = &rrplanned
+		}
+	}
 
 	return domain.Position{
 		ID:         newPositionID,
@@ -113,5 +123,7 @@ func BuildPositionFromEnvelope(env models.TradeEnvelope) (domain.Position, error
 		ClosedAt:   &end,
 		Orders:     orders,
 		Funding:    helpers.Round8(env.Funding),
+		RR:         RR,
+		RRPlanned:  RRPlanned,
 	}, nil
 }
