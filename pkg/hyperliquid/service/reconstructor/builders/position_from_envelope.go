@@ -1,9 +1,9 @@
 package builders
 
 import (
-	"hyperliquid-trade-reconstructor/internal/domain"
-	"hyperliquid-trade-reconstructor/internal/service/reconstructor/helpers"
-	"hyperliquid-trade-reconstructor/internal/service/reconstructor/models"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/domain"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/models"
 	"math"
 	"strconv"
 	"time"

@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"hyperliquid-trade-reconstructor/pkg/hyperliquid"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid"
 	"net/http"
 )
 

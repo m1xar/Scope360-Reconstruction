@@ -1,7 +1,7 @@
 package builders
 
 import (
-	"hyperliquid-trade-reconstructor/internal/domain"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/domain"
 	"time"
 )
 

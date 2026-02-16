@@ -1,10 +1,10 @@
 package reconstructor
 
 import (
-	"hyperliquid-trade-reconstructor/internal/connector/hyperliquid/executors"
-	"hyperliquid-trade-reconstructor/internal/connector/hyperliquid/models"
-	"hyperliquid-trade-reconstructor/internal/service/reconstructor/helpers"
-	models2 "hyperliquid-trade-reconstructor/internal/service/reconstructor/models"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/executors"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
+	models2 "github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/models"
 	"math"
 	"net/http"
 	"strings"

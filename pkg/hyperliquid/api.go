@@ -1,13 +1,13 @@
 package hyperliquid
 
 import (
-	"hyperliquid-trade-reconstructor/internal/connector/hyperliquid/executors"
-	"hyperliquid-trade-reconstructor/internal/domain"
-	"hyperliquid-trade-reconstructor/internal/service/reconstructor"
-	"hyperliquid-trade-reconstructor/internal/service/reconstructor/builders"
-	"hyperliquid-trade-reconstructor/internal/service/reconstructor/helpers"
-	"hyperliquid-trade-reconstructor/internal/service/reconstructor/models"
-	"hyperliquid-trade-reconstructor/internal/service/reconstructor/workers"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/executors"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/domain"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/builders"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/models"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/workers"
 	"net/http"
 	"sort"
 )

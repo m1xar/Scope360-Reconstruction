@@ -1,9 +1,9 @@
 package workers
 
 import (
-	"hyperliquid-trade-reconstructor/internal/domain"
-	"hyperliquid-trade-reconstructor/internal/service/reconstructor/builders"
-	"hyperliquid-trade-reconstructor/internal/service/reconstructor/models"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/domain"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/builders"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/models"
 	"sync"
 )
 

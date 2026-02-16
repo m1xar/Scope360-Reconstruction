@@ -1,8 +1,8 @@
 package executors
 
 import (
-	"hyperliquid-trade-reconstructor/internal/connector/hyperliquid"
-	"hyperliquid-trade-reconstructor/internal/connector/hyperliquid/models"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
 	"net/http"
 )
 

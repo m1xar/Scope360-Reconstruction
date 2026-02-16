@@ -1,7 +1,7 @@
 package models
 
 import (
-	"hyperliquid-trade-reconstructor/internal/connector/hyperliquid/models"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
 )
 
 type TradeEnvelope struct {
