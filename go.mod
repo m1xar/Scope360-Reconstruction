@@ -1,4 +1,4 @@
-module hyperliquid-trade-reconstructor
+module github.com/m1xar/Hyperliquid_Reconstruction
 
 go 1.25
 
