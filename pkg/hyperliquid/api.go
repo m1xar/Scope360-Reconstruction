@@ -1,6 +1,9 @@
 package hyperliquid
 
 import (
+	"net/http"
+	"sort"
+
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/executors"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/domain"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor"
@@ -8,8 +11,6 @@ import (
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/models"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/workers"
-	"net/http"
-	"sort"
 )
 
 const defaultPositionWorkers = 8
@@ -18,34 +19,34 @@ func GetBuiltPositions(
 	client *http.Client,
 	endpoint string,
 	user string,
-) ([]domain.Position, []domain.Trade, []domain.UserBalanceSnapshot, error) {
+) ([]domain.Position, []domain.UserBalanceSnapshot, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
 
 	fills, err := executors.FetchAllFills(client, endpoint, user)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	orders, err := executors.FetchHistoricalOrders(client, endpoint, user)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	rawFundings, err := executors.FetchAllFunding(client, endpoint, user, 0)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	rawPortfolio, err := executors.FetchPortfolioState(client, endpoint, user)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	portfolio, err := helpers.NormalizePortfolio(rawPortfolio)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	orderIdx := helpers.BuildOrderIndex(orders)
@@ -72,9 +73,7 @@ func GetBuiltPositions(
 
 	balanceSnapshots := builders.BuildUserBalanceSnapshotsFromPortfolio(portfolio)
 	builders.AttachBalanceInitToPositions(&positions, &balanceSnapshots)
-	trades := builders.TradesFromPositions(positions)
-
-	return positions, trades, balanceSnapshots, nil
+	return positions, balanceSnapshots, nil
 }
 
 func GetFundings(
@@ -114,28 +113,6 @@ func GetOpenPositions(
 	}
 
 	return builders.BuildOpenPositionsFromClearinghouse(state, client, endpoint)
-}
-
-func GetBalanceSnapshots( //убрал вызовы, уточнить по валидности
-	client *http.Client,
-	endpoint string,
-	user string,
-) ([]domain.UserBalanceSnapshot, error) {
-	if client == nil {
-		client = http.DefaultClient
-	}
-
-	rawPortfolio, err := executors.FetchPortfolioState(client, endpoint, user)
-	if err != nil {
-		return nil, err
-	}
-
-	portfolio, err := helpers.NormalizePortfolio(rawPortfolio)
-	if err != nil {
-		return nil, err
-	}
-
-	return builders.BuildUserBalanceSnapshotsFromPortfolio(portfolio), nil
 }
 
 func ValidateWalletSubscription(message string) (address string, signature string, ok bool, err error) {

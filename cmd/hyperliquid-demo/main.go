@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid"
 	"net/http"
+
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid"
 )
 
 func main() {
@@ -20,7 +21,7 @@ func main() {
 	}
 	_ = sig
 
-	positionList, trades, balanceSnapshots, err := hyperliquid.GetBuiltPositions(client, endpoint, user)
+	positionList, balanceSnapshots, err := hyperliquid.GetBuiltPositions(client, endpoint, user)
 	if err != nil {
 		panic(err)
 	}
@@ -29,11 +30,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
-	//balanceSnapshots, err := hyperliquid.GetBalanceSnapshots(client, endpoint, user)
-	//if err != nil {
-	//	panic(err)
-	//}
 
 	openPositions, err := hyperliquid.GetOpenPositions(client, endpoint, user)
 	if err != nil {
@@ -45,11 +41,10 @@ func main() {
 		for _, order := range pos.Orders {
 			fmt.Printf("Order %+v\n", order)
 		}
+		for _, trade := range pos.Trades {
+			fmt.Printf("Trade %+v\n", trade)
+		}
 		fmt.Printf("\n")
-	}
-
-	for _, trade := range trades {
-		fmt.Printf("Trade %+v\n", trade)
 	}
 
 	for _, fund := range fundings {

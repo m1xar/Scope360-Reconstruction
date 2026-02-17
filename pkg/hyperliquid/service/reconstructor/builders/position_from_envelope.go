@@ -21,6 +21,7 @@ func BuildPositionFromEnvelope(env models.TradeEnvelope) (domain.Position, error
 	var amount, fee, pnl float64
 
 	var orders []domain.Order
+	var trades []domain.Trade
 
 	newID, err := uuid.NewV7()
 	if err != nil {
@@ -60,6 +61,16 @@ func BuildPositionFromEnvelope(env models.TradeEnvelope) (domain.Position, error
 			StopPrice:         helpers.Round8(helpers.MustFloat(f.Px)),
 			OriginalPrice:     helpers.Round8(helpers.MustFloat(f.Px)),
 			UpdatedAt:         time.UnixMilli(f.Time).UTC(),
+		})
+
+		trades = append(trades, domain.Trade{
+			OrderID:    newID,
+			Side:       side,
+			Price:      helpers.Round8(helpers.MustFloat(f.Px)),
+			Amount:     helpers.Round8(helpers.MustFloat(f.Sz)),
+			Commission: helpers.Round8(helpers.MustFloat(f.Fee)),
+			Profit:     helpers.Round8(helpers.MustFloat(f.ClosedPnl)),
+			DoneAt:     time.UnixMilli(f.Time).UTC(),
 		})
 	}
 
@@ -123,6 +134,7 @@ func BuildPositionFromEnvelope(env models.TradeEnvelope) (domain.Position, error
 		CreatedAt:  start,
 		ClosedAt:   &end,
 		Orders:     orders,
+		Trades:     trades,
 		Funding:    helpers.Round8(env.Funding),
 		RR:         RR,
 		RRPlanned:  RRPlanned,

@@ -48,5 +48,6 @@ type Position struct {
 	CreatedAt        time.Time
 	ClosedAt         *time.Time
 	Orders           []Order
+	Trades           []Trade
 	BalanceInit      float64
 }
