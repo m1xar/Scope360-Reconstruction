@@ -1,12 +1,13 @@
 package builders
 
 import (
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/domain"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/models"
 	"math"
 	"strconv"
 	"time"
+
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/domain"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/models"
 
 	"github.com/google/uuid"
 )
@@ -78,13 +79,13 @@ func BuildPositionFromEnvelope(env models.TradeEnvelope) (domain.Position, error
 
 	var mae, mfe *float64
 	if env.High != nil && env.Low != nil {
-		if side == "Long" {
+		if side == "BUY" {
 			maeVal := helpers.Round8((*env.Low - entry) * amount)
 			mfeVal := helpers.Round8((*env.High - entry) * amount)
 			mae = &maeVal
 			mfe = &mfeVal
 		}
-		if side == "Short" {
+		if side == "SELL" {
 			maeVal := helpers.Round8((entry - *env.High) * amount)
 			mfeVal := helpers.Round8((entry - *env.Low) * amount)
 			mae = &maeVal

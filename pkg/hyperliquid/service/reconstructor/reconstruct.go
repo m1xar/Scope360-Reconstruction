@@ -1,14 +1,15 @@
 package reconstructor
 
 import (
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/executors"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
-	models2 "github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/models"
 	"math"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/executors"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
+	models2 "github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/models"
 )
 
 func ReconstructTrades(
@@ -73,8 +74,9 @@ func ReconstructTrades(
 
 				fillTypes := make(map[int64]string, len(cp))
 				for _, fl := range cp {
+					fillTypes[fl.Tid] = "MARKET"
+
 					if ordersAt, ok := orderIdx[fl.Time]; ok {
-						fillTypes[fl.Tid] = "MARKET"
 						for _, ord := range ordersAt {
 							if ord.Order.Coin != symbol {
 								continue

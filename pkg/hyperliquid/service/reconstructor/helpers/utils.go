@@ -28,9 +28,9 @@ func isPerpDir(dir string) bool {
 
 func SideFromDir(dir string) string {
 	if strings.Contains(dir, "Long") {
-		return "LONG"
+		return "BUY"
 	}
-	return "SHORT"
+	return "SELL"
 }
 
 func NormalizeFills(fills []models.RawFill) []models.RawFill {
