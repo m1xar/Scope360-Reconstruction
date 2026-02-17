@@ -23,17 +23,18 @@ func BuildPositionFromEnvelope(env models.TradeEnvelope) (domain.Position, error
 	var orders []domain.Order
 	var trades []domain.Trade
 
-	newID, err := uuid.NewV7()
-	if err != nil {
-		return domain.Position{}, err
-	}
-
 	newPositionID, err := uuid.NewV7()
 	if err != nil {
 		return domain.Position{}, err
 	}
 
 	for _, f := range fills {
+
+		newID, err := uuid.NewV7()
+		if err != nil {
+			return domain.Position{}, err
+		}
+
 		if helpers.IsOpen(f.Dir) {
 			amount += helpers.MustFloat(f.Sz)
 		}
