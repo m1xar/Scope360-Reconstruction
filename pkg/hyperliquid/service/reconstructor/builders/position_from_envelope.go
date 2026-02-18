@@ -57,21 +57,19 @@ func BuildPositionFromEnvelope(env models.TradeEnvelope) (domain.Position, error
 		}
 
 		orders = append(orders, domain.Order{
-			ID:                newID,
-			PositionID:        newPositionID,
-			ExchangeOrderID:   strconv.FormatInt(f.Tid, 10),
-			Type:              env.FillTypes[f.Tid],
-			OriginalOrderType: env.FillTypes[f.Tid],
-			Status:            "Filled",
-			Side:              side,
-			Reduce:            true,
-			Amount:            helpers.Round8(helpers.MustFloat(f.Sz)),
-			AmountFilled:      helpers.Round8(helpers.MustFloat(f.Sz)),
-			AveragePrice:      helpers.Round8(helpers.MustFloat(f.Px)),
-			StopPrice:         helpers.Round8(helpers.MustFloat(f.Px)),
-			OriginalPrice:     helpers.Round8(helpers.MustFloat(f.Px)),
-			UpdatedAt:         time.UnixMilli(f.Time).UTC(),
-			Trade:             trade,
+			ID:              newID,
+			PositionID:      newPositionID,
+			ExchangeOrderID: strconv.FormatInt(f.Tid, 10),
+			Type:            env.FillTypes[f.Tid],
+			Status:          "Filled",
+			Side:            side,
+			Amount:          helpers.Round8(helpers.MustFloat(f.Sz)),
+			AmountFilled:    helpers.Round8(helpers.MustFloat(f.Sz)),
+			AveragePrice:    helpers.Round8(helpers.MustFloat(f.Px)),
+			StopPrice:       helpers.Round8(helpers.MustFloat(f.Px)),
+			OriginalPrice:   helpers.Round8(helpers.MustFloat(f.Px)),
+			UpdatedAt:       time.UnixMilli(f.Time).UTC(),
+			Trade:           trade,
 		})
 	}
 
