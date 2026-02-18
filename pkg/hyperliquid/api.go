@@ -197,12 +197,7 @@ func GetOpenPositions(
 	return builders.BuildOpenPositionsFromClearinghouse(state, client, endpoint)
 }
 
-func ValidateWalletSubscription(message string) (address string, signature string, ok bool, err error) {
-	address, signature, err = helpers.CreateWalletAndSign(message)
-	if err != nil {
-		return "", "", false, err
-	}
-
-	ok = helpers.VerifySignature(address, signature, message)
-	return address, signature, ok, nil
+func ValidateWalletSubscription(address, signature, message string) (bool, error) {
+	ok := helpers.VerifySignature(address, signature, message)
+	return ok, nil
 }

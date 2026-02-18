@@ -8,7 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-func CreateWalletAndSign(message string) (address string, signatureHex string, err error) {
+func CreateWalletAndSign(message string) (address string, signatureHex string, err error) { //тестовый метод на создание волета и подпись меседжа, интернал вызовы убрал, но можно юзать для теста
 	privKey, err := crypto.GenerateKey()
 	if err != nil {
 		return "", "", err
