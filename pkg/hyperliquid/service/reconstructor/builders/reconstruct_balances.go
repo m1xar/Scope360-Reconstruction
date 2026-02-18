@@ -4,15 +4,16 @@ import (
 	"sort"
 	"time"
 
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/domain"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
 )
 
-func ReconstructBalancesFromPositions(
-	positions []domain.Position,
+func ReconstructBalancesFromRawFills(
+	fills []models.RawFill,
 	snapshots *[]domain.UserBalanceSnapshot,
 ) {
-	if len(positions) == 0 || snapshots == nil || len(*snapshots) == 0 {
+	if len(fills) == 0 || snapshots == nil || len(*snapshots) == 0 {
 		return
 	}
 
@@ -20,14 +21,14 @@ func ReconstructBalancesFromPositions(
 		return (*snapshots)[i].CreatedAt.Before((*snapshots)[j].CreatedAt)
 	})
 
-	fixLeadingZeroAndBackfillWithSnapshots(positions, snapshots)
+	fixLeadingZeroAndBackfillWithSnapshots(fills, snapshots)
 }
 
 func fixLeadingZeroAndBackfillWithSnapshots(
-	positions []domain.Position,
+	fills []models.RawFill,
 	snapshots *[]domain.UserBalanceSnapshot,
 ) {
-	if len(positions) == 0 || snapshots == nil || len(*snapshots) == 0 {
+	if len(fills) == 0 || snapshots == nil || len(*snapshots) == 0 {
 		return
 	}
 
@@ -50,8 +51,8 @@ func fixLeadingZeroAndBackfillWithSnapshots(
 	cutoff := snaps[firstNormalIdx].CreatedAt
 
 	hasBeforeZero := false
-	for i := range positions {
-		if positions[i].CreatedAt.Before(zeroSnapTime) {
+	for i := range fills {
+		if time.UnixMilli(fills[i].Time).Before(zeroSnapTime) {
 			hasBeforeZero = true
 			break
 		}
@@ -63,9 +64,9 @@ func fixLeadingZeroAndBackfillWithSnapshots(
 	snaps = append(snaps[:0], snaps[leadingZeroCount:]...)
 	*snapshots = snaps
 
-	earlyIdxs := make([]int, 0, len(positions))
-	for i := range positions {
-		if positions[i].CreatedAt.Before(cutoff) {
+	earlyIdxs := make([]int, 0, len(fills))
+	for i := range fills {
+		if time.UnixMilli(fills[i].Time).Before(cutoff) {
 			earlyIdxs = append(earlyIdxs, i)
 		}
 	}
@@ -74,7 +75,7 @@ func fixLeadingZeroAndBackfillWithSnapshots(
 	}
 
 	sort.Slice(earlyIdxs, func(a, b int) bool {
-		return positions[earlyIdxs[a]].CreatedAt.Before(positions[earlyIdxs[b]].CreatedAt)
+		return fills[earlyIdxs[a]].Time < fills[earlyIdxs[b]].Time
 	})
 
 	snapBalance := balanceAtOrAfterNonZero(*snapshots, cutoff)
@@ -86,12 +87,14 @@ func fixLeadingZeroAndBackfillWithSnapshots(
 	synth := make([]domain.UserBalanceSnapshot, 0, len(earlyIdxs))
 
 	for j := len(earlyIdxs) - 1; j >= 0; j-- {
-		p := positions[earlyIdxs[j]]
-		balanceInit := helpers.Round8(currentBalance - p.NetPnl)
+		f := fills[earlyIdxs[j]]
+		pnl := helpers.MustFloat(f.ClosedPnl)
+		fee := helpers.MustFloat(f.Fee)
+		balanceInit := helpers.Round8(currentBalance - pnl + fee)
 		currentBalance = balanceInit
 
 		synth = append(synth, domain.UserBalanceSnapshot{
-			CreatedAt: p.CreatedAt,
+			CreatedAt: time.UnixMilli(f.Time),
 			Balance:   balanceInit,
 		})
 	}

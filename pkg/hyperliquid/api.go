@@ -72,7 +72,7 @@ func GetBuiltPositions(
 	})
 
 	balanceSnapshots := builders.BuildUserBalanceSnapshotsFromPortfolio(portfolio)
-	builders.ReconstructBalancesFromPositions(positions, &balanceSnapshots)
+	builders.ReconstructBalancesFromRawFills(fills, &balanceSnapshots)
 	builders.AttachBalanceInitToPositions(&positions, balanceSnapshots)
 	return positions, nil
 }
@@ -123,38 +123,7 @@ func GetBalanceSnapshots(
 		return balanceSnapshots, nil
 	}
 
-	orders, err := executors.FetchHistoricalOrders(client, endpoint, user)
-	if err != nil {
-		return nil, err
-	}
-
-	rawFundings, err := executors.FetchAllFunding(client, endpoint, user, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	orderIdx := helpers.BuildOrderIndex(orders)
-
-	envelopes := make(chan models.TradeEnvelope)
-	positionsCh := make(chan domain.Position)
-
-	go func() {
-		reconstructor.ReconstructTrades(fills, rawFundings, orderIdx, client, endpoint, envelopes)
-		close(envelopes)
-	}()
-
-	workers.StartPositionBuilders(envelopes, positionsCh, defaultPositionWorkers)
-
-	positions := make([]domain.Position, 0)
-	for pos := range positionsCh {
-		positions = append(positions, pos)
-	}
-
-	sort.Slice(positions, func(i, j int) bool {
-		return positions[i].ClosedAt.Before(*positions[j].ClosedAt)
-	})
-
-	builders.ReconstructBalancesFromPositions(positions, &balanceSnapshots)
+	builders.ReconstructBalancesFromRawFills(fills, &balanceSnapshots)
 	return balanceSnapshots, nil
 }
 
