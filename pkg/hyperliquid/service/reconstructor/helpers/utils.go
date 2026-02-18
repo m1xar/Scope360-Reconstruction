@@ -7,6 +7,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func MustFloat(s string) float64 {
@@ -211,4 +212,12 @@ func normalizeHistory(raw [][]json.RawMessage) ([]models.HistoryPoint, error) {
 
 func Round8(val float64) float64 {
 	return math.Round(val*1e8) / 1e8
+}
+
+func CutoffFromDays(days int) *time.Time {
+	if days <= 0 {
+		return nil
+	}
+	cutoff := time.Now().AddDate(0, 0, -days)
+	return &cutoff
 }

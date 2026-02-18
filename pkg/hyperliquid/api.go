@@ -19,6 +19,7 @@ func GetBuiltPositions(
 	client *http.Client,
 	endpoint string,
 	user string,
+	days int,
 ) ([]domain.Position, error) {
 	if client == nil {
 		client = http.DefaultClient
@@ -74,6 +75,16 @@ func GetBuiltPositions(
 	balanceSnapshots := builders.BuildUserBalanceSnapshotsFromPortfolio(portfolio)
 	builders.ReconstructBalancesFromRawFills(fills, &balanceSnapshots)
 	builders.AttachBalanceInitToPositions(&positions, balanceSnapshots)
+	cutoff := helpers.CutoffFromDays(days)
+	if cutoff != nil {
+		filtered := positions[:0]
+		for _, pos := range positions {
+			if !pos.ClosedAt.Before(*cutoff) {
+				filtered = append(filtered, pos)
+			}
+		}
+		positions = filtered
+	}
 	return positions, nil
 }
 
@@ -81,6 +92,7 @@ func GetBalanceSnapshots(
 	client *http.Client,
 	endpoint string,
 	user string,
+	days int,
 ) ([]domain.UserBalanceSnapshot, error) {
 	if client == nil {
 		client = http.DefaultClient
@@ -124,6 +136,16 @@ func GetBalanceSnapshots(
 	}
 
 	builders.ReconstructBalancesFromRawFills(fills, &balanceSnapshots)
+	cutoff := helpers.CutoffFromDays(days)
+	if cutoff != nil {
+		filtered := balanceSnapshots[:0]
+		for _, snapshot := range balanceSnapshots {
+			if !snapshot.CreatedAt.Before(*cutoff) {
+				filtered = append(filtered, snapshot)
+			}
+		}
+		balanceSnapshots = filtered
+	}
 	return balanceSnapshots, nil
 }
 
@@ -131,6 +153,7 @@ func GetFundings(
 	client *http.Client,
 	endpoint string,
 	user string,
+	days int,
 ) ([]domain.UserFunding, error) {
 	if client == nil {
 		client = http.DefaultClient
@@ -146,6 +169,16 @@ func GetFundings(
 		fundings = append(fundings, builders.BuildUserFunding(fund))
 	}
 
+	cutoff := helpers.CutoffFromDays(days)
+	if cutoff != nil {
+		filtered := fundings[:0]
+		for _, funding := range fundings {
+			if !funding.CreatedAt.Before(*cutoff) {
+				filtered = append(filtered, funding)
+			}
+		}
+		fundings = filtered
+	}
 	return fundings, nil
 }
 
@@ -153,10 +186,12 @@ func GetOpenPositions(
 	client *http.Client,
 	endpoint string,
 	user string,
+	days int,
 ) ([]domain.OpenPosition, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
+	_ = days
 
 	state, err := executors.FetchClearinghouseState(client, endpoint, user)
 	if err != nil {
