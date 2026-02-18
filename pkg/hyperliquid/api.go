@@ -153,7 +153,7 @@ func GetCurrentBalance(
 	client *http.Client,
 	endpoint string,
 	user string,
-) (*domain.UserBalanceSnapshot, error) {
+) (*float64, error) {
 	balanceSnapshots, err := GetBalanceSnapshots(client, endpoint, user, 0)
 	if err != nil {
 		return nil, err
@@ -161,7 +161,7 @@ func GetCurrentBalance(
 	if len(balanceSnapshots) == 0 {
 		return nil, nil
 	}
-	return &balanceSnapshots[len(balanceSnapshots)-1], nil
+	return &balanceSnapshots[len(balanceSnapshots)-1].Balance, nil
 }
 
 func GetFundings(
