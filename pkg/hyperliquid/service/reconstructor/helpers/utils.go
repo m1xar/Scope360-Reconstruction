@@ -33,6 +33,13 @@ func SideFromDir(dir string) string {
 	return "SELL"
 }
 
+func PositionSideFromDir(dir string) string {
+	if strings.Contains(dir, "Long") {
+		return "LONG"
+	}
+	return "SHORT"
+}
+
 func NormalizeFills(fills []models.RawFill) []models.RawFill {
 	out := make([]models.RawFill, 0, len(fills))
 	for _, f := range fills {

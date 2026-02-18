@@ -21,6 +21,7 @@ type Order struct {
 	StopPrice         float64
 	OriginalPrice     float64
 	UpdatedAt         time.Time
+	Trade             Trade
 }
 
 type Position struct {
@@ -48,6 +49,5 @@ type Position struct {
 	CreatedAt        time.Time
 	ClosedAt         *time.Time
 	Orders           []Order
-	Trades           []Trade
 	BalanceInit      float64
 }
