@@ -4,6 +4,7 @@ go 1.25
 
 require (
 	github.com/ethereum/go-ethereum v1.16.8
+	github.com/go-resty/resty/v2 v2.11.0
 	github.com/google/uuid v1.6.0
 )
 
@@ -12,5 +13,6 @@ require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
 	golang.org/x/crypto v0.36.0 // indirect
+	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/sys v0.36.0 // indirect
 )

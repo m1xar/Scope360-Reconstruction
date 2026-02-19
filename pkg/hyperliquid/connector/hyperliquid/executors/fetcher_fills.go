@@ -1,10 +1,11 @@
 package executors
 
 import (
+	"sort"
+
+	"github.com/go-resty/resty/v2"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
-	"net/http"
-	"sort"
 )
 
 type fillKey struct {
@@ -12,7 +13,7 @@ type fillKey struct {
 	Tid  int64
 }
 
-func FetchAllFills(client *http.Client, endpoint, user string) ([]models.RawFill, error) {
+func FetchAllFills(client *resty.Client, endpoint, user string) ([]models.RawFill, error) {
 	var (
 		startTime int64
 		result    []models.RawFill

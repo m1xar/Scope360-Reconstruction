@@ -1,9 +1,9 @@
 package executors
 
 import (
+	"github.com/go-resty/resty/v2"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
-	"net/http"
 )
 
 type clearinghouseStateRequest struct {
@@ -12,7 +12,7 @@ type clearinghouseStateRequest struct {
 }
 
 func FetchClearinghouseState(
-	client *http.Client,
+	client *resty.Client,
 	endpoint string,
 	user string,
 ) (models.ClearinghouseState, error) {

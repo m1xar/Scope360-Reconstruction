@@ -1,13 +1,13 @@
 package executors
 
 import (
+	"github.com/go-resty/resty/v2"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
-	"net/http"
 )
 
 func FetchAllCandlesHyperliquid(
-	client *http.Client,
+	client *resty.Client,
 	endpoint string,
 	coin string,
 	interval string,

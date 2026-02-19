@@ -1,17 +1,18 @@
 package builders
 
 import (
+	"math"
+
+	"github.com/go-resty/resty/v2"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/executors"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/domain"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
-	"math"
-	"net/http"
 )
 
 func BuildOpenPositionsFromClearinghouse(
 	state models.ClearinghouseState,
-	client *http.Client,
+	client *resty.Client,
 	endpoint string,
 ) ([]domain.OpenPosition, error) {
 	out := make([]domain.OpenPosition, 0, len(state.AssetPositions))

@@ -1,9 +1,9 @@
 package executors
 
 import (
+	"github.com/go-resty/resty/v2"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
-	"net/http"
 )
 
 type portfolioStateRequest struct {
@@ -12,7 +12,7 @@ type portfolioStateRequest struct {
 }
 
 func FetchPortfolioState(
-	client *http.Client,
+	client *resty.Client,
 	endpoint string,
 	user string,
 ) (models.RawPortfolioResponse, error) {

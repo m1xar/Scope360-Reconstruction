@@ -2,10 +2,10 @@ package reconstructor
 
 import (
 	"math"
-	"net/http"
 	"strings"
 	"time"
 
+	"github.com/go-resty/resty/v2"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/executors"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
@@ -16,7 +16,7 @@ func ReconstructTrades(
 	fills []models.RawFill,
 	fundings []models.FundingHistoryItem,
 	orderIdx helpers.OrderIndex,
-	client *http.Client,
+	client *resty.Client,
 	endpoint string,
 	out chan<- models2.TradeEnvelope,
 ) {

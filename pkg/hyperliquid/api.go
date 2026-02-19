@@ -1,9 +1,9 @@
 package hyperliquid
 
 import (
-	"net/http"
 	"sort"
 
+	"github.com/go-resty/resty/v2"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/executors"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/domain"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor"
@@ -16,13 +16,13 @@ import (
 const defaultPositionWorkers = 8
 
 func GetBuiltPositions(
-	client *http.Client,
+	client *resty.Client,
 	endpoint string,
 	user string,
 	days int,
 ) ([]domain.Position, error) {
 	if client == nil {
-		client = http.DefaultClient
+		client = resty.New()
 	}
 
 	fills, err := executors.FetchAllFills(client, endpoint, user)
@@ -89,13 +89,13 @@ func GetBuiltPositions(
 }
 
 func GetBalanceSnapshots(
-	client *http.Client,
+	client *resty.Client,
 	endpoint string,
 	user string,
 	days int,
 ) ([]domain.UserBalanceSnapshot, error) {
 	if client == nil {
-		client = http.DefaultClient
+		client = resty.New()
 	}
 
 	fills, err := executors.FetchAllFills(client, endpoint, user)
@@ -150,7 +150,7 @@ func GetBalanceSnapshots(
 }
 
 func GetCurrentBalance(
-	client *http.Client,
+	client *resty.Client,
 	endpoint string,
 	user string,
 ) (*float64, error) {
@@ -165,13 +165,13 @@ func GetCurrentBalance(
 }
 
 func GetFundings(
-	client *http.Client,
+	client *resty.Client,
 	endpoint string,
 	user string,
 	days int,
 ) ([]domain.UserFunding, error) {
 	if client == nil {
-		client = http.DefaultClient
+		client = resty.New()
 	}
 
 	rawFundings, err := executors.FetchAllFunding(client, endpoint, user, 0)
@@ -198,13 +198,13 @@ func GetFundings(
 }
 
 func GetOpenPositions(
-	client *http.Client,
+	client *resty.Client,
 	endpoint string,
 	user string,
 	days int,
 ) ([]domain.OpenPosition, error) {
 	if client == nil {
-		client = http.DefaultClient
+		client = resty.New()
 	}
 	_ = days
 
