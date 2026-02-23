@@ -2,6 +2,7 @@ package hyperliquid
 
 import (
 	"sort"
+	"time"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/executors"
@@ -76,16 +77,39 @@ func GetBuiltPositions(
 	builders.ReconstructBalancesFromRawFills(fills, &balanceSnapshots)
 	builders.AttachBalanceInitToPositions(&positions, balanceSnapshots)
 	cutoff := helpers.CutoffFromDays(days)
-	if cutoff != nil {
-		filtered := positions[:0]
-		for _, pos := range positions {
-			if !pos.ClosedAt.Before(*cutoff) {
-				filtered = append(filtered, pos)
-			}
-		}
-		positions = filtered
-	}
+	positions = helpers.FilterPositionsByClosedAt(positions, cutoff)
 	return positions, nil
+}
+
+func GetClosedPositionByExactMatch(
+	client *resty.Client,
+	endpoint string,
+	user string,
+	days int,
+	pair string,
+	openedAt time.Time,
+	side string,
+) (*domain.Position, error) {
+	positions, err := GetBuiltPositions(client, endpoint, user, days)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range positions {
+		pos := &positions[i]
+		if pos.Pair != pair {
+			continue
+		}
+		if pos.Side != side {
+			continue
+		}
+		if !pos.CreatedAt.Equal(openedAt) {
+			continue
+		}
+		return pos, nil
+	}
+
+	return nil, nil
 }
 
 func GetBalanceSnapshots(
@@ -137,15 +161,7 @@ func GetBalanceSnapshots(
 
 	builders.ReconstructBalancesFromRawFills(fills, &balanceSnapshots)
 	cutoff := helpers.CutoffFromDays(days)
-	if cutoff != nil {
-		filtered := balanceSnapshots[:0]
-		for _, snapshot := range balanceSnapshots {
-			if !snapshot.CreatedAt.Before(*cutoff) {
-				filtered = append(filtered, snapshot)
-			}
-		}
-		balanceSnapshots = filtered
-	}
+	balanceSnapshots = helpers.FilterBalanceSnapshotsByCreatedAt(balanceSnapshots, cutoff)
 	return balanceSnapshots, nil
 }
 
@@ -185,15 +201,7 @@ func GetFundings(
 	}
 
 	cutoff := helpers.CutoffFromDays(days)
-	if cutoff != nil {
-		filtered := fundings[:0]
-		for _, funding := range fundings {
-			if !funding.CreatedAt.Before(*cutoff) {
-				filtered = append(filtered, funding)
-			}
-		}
-		fundings = filtered
-	}
+	fundings = helpers.FilterFundingsByCreatedAt(fundings, cutoff)
 	return fundings, nil
 }
 
@@ -208,12 +216,12 @@ func GetOpenPositions(
 	}
 	_ = days
 
-	state, err := executors.FetchClearinghouseState(client, endpoint, user)
+	fills, err := executors.FetchAllFills(client, endpoint, user)
 	if err != nil {
 		return nil, err
 	}
 
-	return builders.BuildOpenPositionsFromClearinghouse(state, client, endpoint)
+	return builders.BuildOpenPositionsFromFills(fills), nil
 }
 
 func ValidateWalletSubscription(address, signature, message string) (bool, error) {

@@ -1,11 +1,12 @@
 package domain
 
+import "time"
+
 type OpenPosition struct {
-	Pair             string
-	Amount           float64
-	Leverage         float64
-	EntryPrice       float64
-	Pnl              float64
-	LiquidationPrice float64
-	CurrentPrice     float64
+	Pair         string
+	Amount       float64
+	Side         string
+	EntryPrice   float64
+	CurrentPrice float64
+	OpenTime     time.Time
 }
