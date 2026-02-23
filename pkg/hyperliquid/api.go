@@ -85,12 +85,11 @@ func GetClosedPositionByExactMatch(
 	client *resty.Client,
 	endpoint string,
 	user string,
-	days int,
 	pair string,
 	openedAt time.Time,
 	side string,
 ) (*domain.Position, error) {
-	positions, err := GetBuiltPositions(client, endpoint, user, days)
+	positions, err := GetBuiltPositions(client, endpoint, user, 0)
 	if err != nil {
 		return nil, err
 	}
