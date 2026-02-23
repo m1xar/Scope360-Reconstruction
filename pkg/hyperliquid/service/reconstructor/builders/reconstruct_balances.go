@@ -21,7 +21,17 @@ func ReconstructBalancesFromRawFills(
 		return (*snapshots)[i].CreatedAt.Before((*snapshots)[j].CreatedAt)
 	})
 
+	sort.Slice(fills, func(i, j int) bool {
+		return fills[i].Time < fills[j].Time
+	})
+
 	fixLeadingZeroAndBackfillWithSnapshots(fills, snapshots)
+
+	sort.Slice(*snapshots, func(i, j int) bool {
+		return (*snapshots)[i].CreatedAt.Before((*snapshots)[j].CreatedAt)
+	})
+
+	ensureSnapshotsForFillGaps(fills, snapshots)
 }
 
 func fixLeadingZeroAndBackfillWithSnapshots(
@@ -138,4 +148,136 @@ func dedupSnapshotsByCreatedAtKeepLast(snaps []domain.UserBalanceSnapshot) []dom
 		out = append(out, snaps[i])
 	}
 	return out
+}
+
+func ensureSnapshotsForFillGaps(
+	fills []models.RawFill,
+	snapshots *[]domain.UserBalanceSnapshot,
+) {
+	if len(fills) == 0 || snapshots == nil || len(*snapshots) == 0 {
+		return
+	}
+
+	snaps := *snapshots
+	sort.Slice(fills, func(i, j int) bool {
+		return fills[i].Time < fills[j].Time
+	})
+
+	intervalTimes := make([]time.Time, 0, len(fills))
+	intervalTimes = append(intervalTimes, time.UnixMilli(fills[0].Time))
+	for i := 1; i < len(fills); i++ {
+		if fills[i].Time != fills[i-1].Time {
+			intervalTimes = append(intervalTimes, time.UnixMilli(fills[i].Time))
+		}
+	}
+
+	synth := make([]domain.UserBalanceSnapshot, 0, len(intervalTimes))
+	var prev *time.Time
+	for _, end := range intervalTimes {
+		if snapshotExistsInRange(snaps, prev, end) {
+			prev = &end
+			continue
+		}
+
+		anchorIdx := firstNonZeroSnapshotAfter(snaps, end)
+		if anchorIdx < 0 {
+			prev = &end
+			continue
+		}
+
+		anchor := snaps[anchorIdx]
+		balance, ok := backfillBalanceAtTime(fills, anchor, end)
+		if !ok {
+			prev = &end
+			continue
+		}
+
+		synth = append(synth, domain.UserBalanceSnapshot{
+			CreatedAt: end,
+			Balance:   balance,
+		})
+		prev = &end
+	}
+
+	if len(synth) == 0 {
+		return
+	}
+
+	*snapshots = append(*snapshots, synth...)
+	sort.Slice(*snapshots, func(i, j int) bool {
+		return (*snapshots)[i].CreatedAt.Before((*snapshots)[j].CreatedAt)
+	})
+	*snapshots = dedupSnapshotsByCreatedAtKeepLast(*snapshots)
+}
+
+func snapshotExistsInRange(
+	snaps []domain.UserBalanceSnapshot,
+	startExclusive *time.Time,
+	endInclusive time.Time,
+) bool {
+	if len(snaps) == 0 {
+		return false
+	}
+
+	if startExclusive == nil {
+		idx := sort.Search(len(snaps), func(i int) bool {
+			return snaps[i].CreatedAt.After(endInclusive)
+		})
+		return idx > 0
+	}
+
+	start := *startExclusive
+	if !start.Before(endInclusive) {
+		return false
+	}
+	idx := sort.Search(len(snaps), func(i int) bool {
+		return snaps[i].CreatedAt.After(start)
+	})
+	if idx >= len(snaps) {
+		return false
+	}
+	return !snaps[idx].CreatedAt.After(endInclusive)
+}
+
+func firstNonZeroSnapshotAfter(snaps []domain.UserBalanceSnapshot, at time.Time) int {
+	start := sort.Search(len(snaps), func(i int) bool {
+		return snaps[i].CreatedAt.After(at)
+	})
+	for i := start; i < len(snaps); i++ {
+		if snaps[i].Balance != 0 {
+			return i
+		}
+	}
+	return -1
+}
+
+func backfillBalanceAtTime(
+	fills []models.RawFill,
+	anchor domain.UserBalanceSnapshot,
+	target time.Time,
+) (float64, bool) {
+	anchorMs := anchor.CreatedAt.UnixMilli()
+	targetMs := target.UnixMilli()
+	if anchorMs <= targetMs {
+		return 0, false
+	}
+
+	endIdx := sort.Search(len(fills), func(i int) bool {
+		return fills[i].Time > anchorMs
+	}) - 1
+	if endIdx < 0 {
+		return anchor.Balance, true
+	}
+
+	currentBalance := anchor.Balance
+	for i := endIdx; i >= 0; i-- {
+		t := fills[i].Time
+		if t <= targetMs {
+			break
+		}
+		pnl := helpers.MustFloat(fills[i].ClosedPnl)
+		fee := helpers.MustFloat(fills[i].Fee)
+		currentBalance = helpers.Round8(currentBalance - pnl + fee)
+	}
+	return currentBalance, true
 }
