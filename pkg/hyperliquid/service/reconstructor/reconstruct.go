@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/binance"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/executors"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
@@ -73,20 +74,33 @@ func ReconstructTrades(
 			FillTypes:  fillTypes,
 		}
 
-		const maxAgeMinutes = int64(5000)
-		maxAgeMs := maxAgeMinutes * 60 * 1000
-		if time.Now().UnixMilli()-cp[0].Time < maxAgeMs {
-			candles, err := executors.FetchAllCandlesHyperliquid(
+		const interval = "1m"
+		intervalMs, _ := helpers.IntervalToMs(interval)
+		oldestAllowedMs := time.Now().UnixMilli() - intervalMs*5000
+
+		var candles []models.HyperliquidCandle
+		var err error
+		if cp[0].Time < oldestAllowedMs {
+			candles, err = binance.FetchFuturesKlinesPaged(
+				client,
+				symbol,
+				interval,
+				cp[0].Time,
+				cp[len(cp)-1].Time,
+				499,
+			)
+		} else {
+			candles, err = executors.FetchAllCandlesHyperliquid(
 				client,
 				endpoint,
 				symbol,
-				"1m",
+				interval,
 				cp[0].Time,
 				cp[len(cp)-1].Time,
 			)
-			if err == nil {
-				env.High, env.Low = helpers.GetHighLowHyperliquid(candles)
-			}
+		}
+		if err == nil {
+			env.High, env.Low = helpers.GetHighLowHyperliquid(candles)
 		}
 
 		out <- env

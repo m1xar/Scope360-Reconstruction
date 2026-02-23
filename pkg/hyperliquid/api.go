@@ -1,11 +1,14 @@
 package hyperliquid
 
 import (
+	"errors"
 	"sort"
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/binance"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/executors"
+	hlmodels "github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/domain"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/builders"
@@ -202,6 +205,52 @@ func GetFundings(
 	cutoff := helpers.CutoffFromDays(days)
 	fundings = helpers.FilterFundingsByCreatedAt(fundings, cutoff)
 	return fundings, nil
+}
+
+func GetCandles(
+	client *resty.Client,
+	endpoint string,
+	coin string,
+	interval string,
+	startTime time.Time,
+	endTime time.Time,
+) ([]hlmodels.HyperliquidCandle, error) {
+	if client == nil {
+		client = resty.New()
+	}
+
+	if endTime.Before(startTime) {
+		return nil, errors.New("endTime must be >= startTime")
+	}
+
+	if _, err := helpers.IntervalToMs(interval); err != nil {
+		return nil, err
+	}
+
+	intervalMs, _ := helpers.IntervalToMs(interval)
+	startMs := startTime.UnixMilli()
+	endMs := endTime.UnixMilli()
+
+	oldestAllowedMs := time.Now().UnixMilli() - intervalMs*5000
+	if startMs < oldestAllowedMs {
+		return binance.FetchFuturesKlinesPaged(
+			client,
+			coin,
+			interval,
+			startMs,
+			endMs,
+			499,
+		)
+	}
+
+	return executors.FetchAllCandlesHyperliquid(
+		client,
+		endpoint,
+		coin,
+		interval,
+		startMs,
+		endMs,
+	)
 }
 
 func GetOpenPositions(
