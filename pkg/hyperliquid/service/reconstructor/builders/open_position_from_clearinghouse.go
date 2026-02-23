@@ -34,17 +34,12 @@ func BuildOpenPositionsFromClearinghouse(
 
 		size := helpers.MustFloat(pos.Szi)
 		entry := helpers.MustFloat(pos.EntryPx)
-		pnl := helpers.MustFloat(pos.UnrealizedPnl)
-		liq := helpers.MustFloat(pos.LiquidationPx)
 
 		out = append(out, domain.OpenPosition{
-			Pair:             pos.Coin + "USDC",
-			Amount:           math.Abs(helpers.Round8(size)),
-			Leverage:         helpers.Round8(pos.Leverage.Value),
-			EntryPrice:       helpers.Round8(entry),
-			Pnl:              helpers.Round8(pnl),
-			LiquidationPrice: helpers.Round8(liq),
-			CurrentPrice:     helpers.Round8(coinPrice[pos.Coin]),
+			Pair:         pos.Coin + "USDC",
+			Amount:       math.Abs(helpers.Round8(size)),
+			EntryPrice:   helpers.Round8(entry),
+			CurrentPrice: helpers.Round8(coinPrice[pos.Coin]),
 		})
 	}
 
