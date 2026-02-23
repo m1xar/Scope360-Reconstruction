@@ -220,7 +220,7 @@ func GetOpenPositions(
 		return nil, err
 	}
 
-	return builders.BuildOpenPositionsFromFills(fills), nil
+	return builders.BuildOpenPositionsFromFills(client, endpoint, fills), nil
 }
 
 func ValidateWalletSubscription(address, signature, message string) (bool, error) {
