@@ -61,7 +61,7 @@ func BuildPositionFromEnvelope(env models.TradeEnvelope) (domain.Position, error
 			PositionID:      newPositionID,
 			ExchangeOrderID: strconv.FormatInt(f.Tid, 10),
 			Type:            env.FillTypes[f.Tid],
-			Status:          "filled",
+			Status:          "FILLED",
 			Side:            side,
 			Amount:          helpers.Round8(helpers.MustFloat(f.Sz)),
 			AmountFilled:    helpers.Round8(helpers.MustFloat(f.Sz)),
