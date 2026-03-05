@@ -269,6 +269,7 @@ func GetOpenPositions(
 		return nil, err
 	}
 
+	fills = helpers.NormalizeFills(fills)
 	return builders.BuildOpenPositionsFromFills(client, endpoint, fills), nil
 }
 

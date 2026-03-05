@@ -3,11 +3,12 @@ package helpers
 import (
 	"encoding/json"
 	"errors"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
 	"math"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
 )
 
 func MustFloat(s string) float64 {
@@ -27,6 +28,21 @@ func isPerpDir(dir string) bool {
 	return IsOpen(dir) || IsClose(dir)
 }
 
+func isReverseDir(dir string) bool {
+	return dir == "Long > Short" || dir == "Short > Long"
+}
+
+func splitReverseDir(dir string) (closeDir, openDir string) {
+	switch dir {
+	case "Long > Short":
+		return "Close Long", "Open Short"
+	case "Short > Long":
+		return "Close Short", "Open Long"
+	default:
+		return "", ""
+	}
+}
+
 func SideFromDir(dir string) string {
 	if strings.Contains(dir, "Long") {
 		return "BUY"
@@ -43,9 +59,53 @@ func PositionSideFromDir(dir string) string {
 
 func NormalizeFills(fills []models.RawFill) []models.RawFill {
 	out := make([]models.RawFill, 0, len(fills))
+	synthTid := int64(-1)
 	for _, f := range fills {
 		if isPerpDir(f.Dir) {
 			out = append(out, f)
+			continue
+		}
+		if !isReverseDir(f.Dir) {
+			continue
+		}
+
+		closeDir, openDir := splitReverseDir(f.Dir)
+		totalSize := MustFloat(f.Sz)
+		if totalSize <= 0 {
+			continue
+		}
+
+		startPos := MustFloat(f.StartPosition)
+		closeSize := math.Abs(startPos)
+		openSize := totalSize - closeSize
+
+		totalFee := MustFloat(f.Fee)
+		feeClose := 0.0
+		if totalSize > 0 && closeSize > 0 {
+			feeClose = totalFee * (closeSize / totalSize)
+		}
+		feeOpen := totalFee - feeClose
+
+		if closeSize > 0 {
+			cf := f
+			cf.Dir = closeDir
+			cf.Sz = strconv.FormatFloat(closeSize, 'g', -1, 64)
+			cf.Fee = strconv.FormatFloat(feeClose, 'g', -1, 64)
+			cf.Tid = synthTid
+			synthTid--
+			out = append(out, cf)
+		}
+
+		if openSize > 0 {
+			of := f
+			of.Dir = openDir
+			of.Sz = strconv.FormatFloat(openSize, 'g', -1, 64)
+			of.ClosedPnl = "0"
+			of.Fee = strconv.FormatFloat(feeOpen, 'g', -1, 64)
+			of.StartPosition = "0"
+			of.Tid = synthTid
+			synthTid--
+			out = append(out, of)
 		}
 	}
 	return out
