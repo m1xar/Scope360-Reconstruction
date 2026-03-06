@@ -81,6 +81,9 @@ func GetBuiltPositions(
 	builders.AttachBalanceInitToPositions(&positions, balanceSnapshots)
 	cutoff := helpers.CutoffFromDays(days)
 	positions = helpers.FilterPositionsByClosedAt(positions, cutoff)
+	for i := range positions {
+		positions[i].Pair = helpers.NormalizeContractName(positions[i].Pair)
+	}
 	return positions, nil
 }
 
@@ -96,6 +99,8 @@ func GetClosedPositionByExactMatch(
 	if err != nil {
 		return nil, err
 	}
+
+	pair = helpers.NormalizeContractName(pair)
 
 	for i := range positions {
 		pos := &positions[i]
@@ -204,6 +209,9 @@ func GetFundings(
 
 	cutoff := helpers.CutoffFromDays(days)
 	fundings = helpers.FilterFundingsByCreatedAt(fundings, cutoff)
+	for i := range fundings {
+		fundings[i].Pair = helpers.NormalizeContractName(fundings[i].Pair)
+	}
 	return fundings, nil
 }
 
@@ -233,7 +241,7 @@ func GetCandles(
 
 	oldestAllowedMs := time.Now().UnixMilli() - intervalMs*5000
 	if startMs < oldestAllowedMs {
-		return binance.FetchFuturesKlinesPaged(
+		candles, err := binance.FetchFuturesKlinesPaged(
 			client,
 			coin,
 			interval,
@@ -241,9 +249,17 @@ func GetCandles(
 			endMs,
 			499,
 		)
+		if err != nil {
+			return nil, err
+		}
+
+		for i := range candles {
+			candles[i].S = helpers.NormalizeContractName(candles[i].S)
+		}
+		return candles, nil
 	}
 
-	return executors.FetchAllCandlesHyperliquid(
+	candles, err := executors.FetchAllCandlesHyperliquid(
 		client,
 		endpoint,
 		coin,
@@ -251,6 +267,14 @@ func GetCandles(
 		startMs,
 		endMs,
 	)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range candles {
+		candles[i].S = helpers.NormalizeContractName(candles[i].S)
+	}
+	return candles, nil
 }
 
 func GetOpenPositions(
@@ -270,7 +294,11 @@ func GetOpenPositions(
 	}
 
 	fills = helpers.NormalizeFills(fills)
-	return builders.BuildOpenPositionsFromFills(client, endpoint, fills), nil
+	openPositions := builders.BuildOpenPositionsFromFills(client, endpoint, fills)
+	for i := range openPositions {
+		openPositions[i].Pair = helpers.NormalizeContractName(openPositions[i].Pair)
+	}
+	return openPositions, nil
 }
 
 func ValidateWalletSubscription(address, signature, message string) (bool, error) {

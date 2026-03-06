@@ -274,6 +274,22 @@ func Round8(val float64) float64 {
 	return math.Round(val*1e8) / 1e8
 }
 
+// NormalizeContractName strips provider prefixes like "hyna:BTCUSDE".
+// It removes everything to the left of the first separator.
+func NormalizeContractName(name string) string {
+	s := strings.TrimSpace(name)
+	if s == "" {
+		return s
+	}
+
+	idx := strings.IndexAny(s, ":")
+	if idx == -1 || idx == len(s)-1 {
+		return s
+	}
+
+	return s[idx+1:]
+}
+
 func CutoffFromDays(days int) *time.Time {
 	if days <= 0 {
 		return nil
