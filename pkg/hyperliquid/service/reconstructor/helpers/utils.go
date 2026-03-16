@@ -60,7 +60,12 @@ func PositionSideFromDir(dir string) string {
 func NormalizeFills(fills []models.RawFill) []models.RawFill {
 	out := make([]models.RawFill, 0, len(fills))
 	synthTid := int64(-1)
+	zeroTids := int64(0)
 	for _, f := range fills {
+		if f.Tid == 0 {
+			f.Tid = zeroTids
+			zeroTids++
+		}
 		if isPerpDir(f.Dir) {
 			out = append(out, f)
 			continue
