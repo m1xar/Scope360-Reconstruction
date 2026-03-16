@@ -1,7 +1,6 @@
 package builders
 
 import (
-	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -38,7 +37,7 @@ func BuildOpenPositionsFromFills(
 		if _, ok := matched[f.Tid]; ok {
 			continue
 		}
-		if !strings.Contains(f.Dir, "Open") && !strings.Contains(f.Dir, "Close") {
+		if !helpers.IsOpen(f.Dir) && !helpers.IsClose(f.Dir) {
 			continue
 		}
 
@@ -52,7 +51,7 @@ func BuildOpenPositionsFromFills(
 		px := helpers.MustFloat(f.Px)
 
 		sz := helpers.MustFloat(f.Sz)
-		if strings.Contains(f.Dir, "Open") {
+		if helpers.IsOpen(f.Dir) {
 			a.openSize += sz
 			a.openNotional += sz * px
 			if a.side == "" {
@@ -61,7 +60,7 @@ func BuildOpenPositionsFromFills(
 			if a.openTimeMs == 0 || f.Time < a.openTimeMs {
 				a.openTimeMs = f.Time
 			}
-		} else if strings.Contains(f.Dir, "Close") {
+		} else if helpers.IsClose(f.Dir) {
 			a.closeSize += sz
 		}
 	}

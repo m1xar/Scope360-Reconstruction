@@ -17,11 +17,18 @@ func MustFloat(s string) float64 {
 }
 
 func IsOpen(dir string) bool {
-	return dir == "Open Long" || dir == "Open Short"
+	return strings.HasPrefix(dir, "Open ") &&
+		(strings.Contains(dir, "Long") || strings.Contains(dir, "Short"))
 }
 
 func IsClose(dir string) bool {
-	return dir == "Close Long" || dir == "Close Short"
+	if strings.HasPrefix(dir, "Close ") &&
+		(strings.Contains(dir, "Long") || strings.Contains(dir, "Short")) {
+		return true
+	}
+
+	return strings.Contains(dir, "Liquid") &&
+		(strings.Contains(dir, "Long") || strings.Contains(dir, "Short"))
 }
 
 func isPerpDir(dir string) bool {
@@ -60,11 +67,17 @@ func PositionSideFromDir(dir string) string {
 func NormalizeFills(fills []models.RawFill) []models.RawFill {
 	out := make([]models.RawFill, 0, len(fills))
 	synthTid := int64(-1)
-	zeroTids := int64(0)
 	for _, f := range fills {
 		if f.Tid == 0 {
-			f.Tid = zeroTids
-			zeroTids++
+			f.Tid = synthTid
+			synthTid--
+		}
+		if IsClose(f.Dir) {
+			if strings.Contains(f.Dir, "Long") {
+				f.Dir = "Close Long"
+			} else if strings.Contains(f.Dir, "Short") {
+				f.Dir = "Close Short"
+			}
 		}
 		if isPerpDir(f.Dir) {
 			out = append(out, f)
