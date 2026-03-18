@@ -80,7 +80,7 @@ func BuildPositionFromEnvelope(env models.TradeEnvelope) (domain.Position, error
 	end := time.UnixMilli(last.Time).UTC()
 
 	net := pnl - fee + env.Funding
-	status := "loss"
+	status := "lose"
 	if net > 0 {
 		status = "win"
 	}
