@@ -51,6 +51,8 @@ func GetBuiltPositions(
 		}
 	}
 
+	oldestMs -= 10 * 60 * 1000
+
 	allOrders, err := executors.FetchAllSwapAndFuturesOrders(client, baseURL, oldestMs)
 	if err != nil {
 		return nil, err
