@@ -2,7 +2,6 @@ package builders
 
 import (
 	"sort"
-	"strconv"
 	"time"
 
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/domain"
@@ -10,52 +9,81 @@ import (
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/service/reconstructor/helpers"
 )
 
-func BuildBalanceSnapshots(currentBalance float64, bills []models.Bill) []domain.UserBalanceSnapshot {
-	if len(bills) == 0 {
+type balanceEvent struct {
+	ts    time.Time
+	delta float64
+}
+
+func BuildBalanceSnapshots(
+	currentBalance float64,
+	closedPositions []models.ClosedPosition,
+	deposits []models.Deposit,
+	withdrawals []models.Withdrawal,
+) []domain.UserBalanceSnapshot {
+	var events []balanceEvent
+
+	for _, cp := range closedPositions {
+		delta := helpers.MustFloat(cp.RealizedPnl) +
+			helpers.MustFloat(cp.Fee) +
+			helpers.MustFloat(cp.FundingFee) +
+			helpers.MustFloat(cp.LiqPenalty)
+		events = append(events, balanceEvent{
+			ts:    helpers.TimeFromMs(cp.UTime),
+			delta: delta,
+		})
+	}
+
+	for _, d := range deposits {
+		if d.State != "2" {
+			continue
+		}
+		events = append(events, balanceEvent{
+			ts:    helpers.TimeFromMs(d.Ts),
+			delta: helpers.MustFloat(d.Amt),
+		})
+	}
+
+	for _, w := range withdrawals {
+		if w.State != "2" {
+			continue
+		}
+		events = append(events, balanceEvent{
+			ts:    helpers.TimeFromMs(w.Ts),
+			delta: -(helpers.MustFloat(w.Amt) + helpers.MustFloat(w.Fee)),
+		})
+	}
+
+	if len(events) == 0 {
 		return []domain.UserBalanceSnapshot{{
 			CreatedAt: time.Now().UTC(),
 			Balance:   helpers.Round8(currentBalance),
 		}}
 	}
 
-	sort.Slice(bills, func(i, j int) bool {
-		ti := helpers.MustInt64(bills[i].Ts)
-		tj := helpers.MustInt64(bills[j].Ts)
-		if ti != tj {
-			return ti > tj
-		}
-
-		bi, errI := strconv.ParseInt(bills[i].BillId, 10, 64)
-		bj, errJ := strconv.ParseInt(bills[j].BillId, 10, 64)
-		if errI == nil && errJ == nil {
-			return bi > bj
-		}
-		return bills[i].BillId > bills[j].BillId
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].ts.After(events[j].ts)
 	})
 
-	snapshots := make([]domain.UserBalanceSnapshot, 0, len(bills)+1)
-
+	snapshots := make([]domain.UserBalanceSnapshot, 0, len(events)+1)
 	snapshots = append(snapshots, domain.UserBalanceSnapshot{
 		CreatedAt: time.Now().UTC(),
 		Balance:   helpers.Round8(currentBalance),
 	})
 
 	balance := currentBalance
-	for _, bill := range bills {
-		balance -= helpers.MustFloat(bill.BalChg)
-
-		billTime := helpers.TimeFromMs(bill.Ts)
-		roundedBalance := helpers.Round8(balance)
+	for _, ev := range events {
+		balance -= ev.delta
+		rounded := helpers.Round8(balance)
 
 		lastIdx := len(snapshots) - 1
-		if lastIdx >= 0 && snapshots[lastIdx].CreatedAt.Equal(billTime) {
-			snapshots[lastIdx].Balance = roundedBalance
+		if snapshots[lastIdx].CreatedAt.Equal(ev.ts) {
+			snapshots[lastIdx].Balance = rounded
 			continue
 		}
 
 		snapshots = append(snapshots, domain.UserBalanceSnapshot{
-			CreatedAt: billTime,
-			Balance:   roundedBalance,
+			CreatedAt: ev.ts,
+			Balance:   rounded,
 		})
 	}
 

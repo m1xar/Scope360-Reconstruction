@@ -17,6 +17,15 @@ import (
 
 const defaultCandleWorkers = 4
 
+func GetAuthStatus(apiKey, secret, passphrase string) (string, okxclient.Region) {
+	region, err := okxclient.CheckAccount(apiKey, secret, passphrase)
+	if err != nil {
+		return "error", ""
+	}
+
+	return "ok", region
+}
+
 func GetBuiltPositions(
 	region okxclient.Region,
 	apiKey, secret, passphrase string,
@@ -32,7 +41,7 @@ func GetBuiltPositions(
 		return nil, err
 	}
 	if len(closedPositions) == 0 {
-		return nil, nil
+		return []domain.Position{}, nil
 	}
 
 	allOrders, err := executors.FetchAllSwapAndFuturesOrders(client, baseURL)
@@ -106,11 +115,12 @@ func GetBuiltPositions(
 
 	balance, err := executors.FetchBalance(client, baseURL)
 	if err == nil {
-		bills, billErr := executors.FetchAllBills(client, baseURL, "")
-		if billErr == nil {
-			snapshots := builders.BuildBalanceSnapshots(helpers.MustFloat(balance.TotalEq), bills)
-			helpers.AttachBalanceInit(&positions, snapshots)
-		}
+		deposits, _ := executors.FetchAllDeposits(client, baseURL)
+		withdrawals, _ := executors.FetchAllWithdrawals(client, baseURL)
+		snapshots := builders.BuildBalanceSnapshots(
+			helpers.MustFloat(balance.TotalEq), closedPositions, deposits, withdrawals,
+		)
+		helpers.AttachBalanceInit(&positions, snapshots)
 	}
 
 	return positions, nil
@@ -173,12 +183,24 @@ func GetBalanceSnapshots(
 		return nil, err
 	}
 
-	bills, err := executors.FetchAllBills(client, baseURL, "")
+	closedPositions, err := executors.FetchAllClosedPositions(client, baseURL)
 	if err != nil {
 		return nil, err
 	}
 
-	snapshots := builders.BuildBalanceSnapshots(helpers.MustFloat(balance.TotalEq), bills)
+	deposits, err := executors.FetchAllDeposits(client, baseURL)
+	if err != nil {
+		return nil, err
+	}
+
+	withdrawals, err := executors.FetchAllWithdrawals(client, baseURL)
+	if err != nil {
+		return nil, err
+	}
+
+	snapshots := builders.BuildBalanceSnapshots(
+		helpers.MustFloat(balance.TotalEq), closedPositions, deposits, withdrawals,
+	)
 
 	cutoff := helpers.CutoffFromDays(days)
 	if cutoff != nil {
