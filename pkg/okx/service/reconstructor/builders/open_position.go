@@ -10,7 +10,7 @@ import (
 
 func BuildOpenPosition(pos models.OpenPosition) domain.OpenPosition {
 	return domain.OpenPosition{
-		Pair:         pos.InstId,
+		Pair:         helpers.NormalizePair(pos.InstId),
 		Amount:       helpers.Round8(math.Abs(helpers.MustFloat(pos.Pos))),
 		Side:         helpers.SideFromPosSide(pos.PosSide, pos.Pos),
 		EntryPrice:   helpers.Round8(helpers.MustFloat(pos.AvgPx)),

@@ -11,10 +11,6 @@ import (
 
 const billsArchivePath = "/api/v5/account/bills-archive"
 
-func FetchAllBills(client *resty.Client, baseURL string, billType string) ([]models.Bill, error) {
-	return FetchAllSwapAndFuturesBills(client, baseURL, billType)
-}
-
 const billsPageLimit = 100
 
 func FetchAllBillsByInstType(client *resty.Client, baseURL, instType, billType string) ([]models.Bill, error) {
@@ -73,5 +69,5 @@ func FetchAllSwapAndFuturesBills(client *resty.Client, baseURL, billType string)
 }
 
 func FetchFundingBills(client *resty.Client, baseURL string) ([]models.Bill, error) {
-	return FetchAllBills(client, baseURL, "8")
+	return FetchAllSwapAndFuturesBills(client, baseURL, "8")
 }

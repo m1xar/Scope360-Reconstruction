@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -14,10 +13,10 @@ import (
 )
 
 const (
-	defaultTimeout      = 20 * time.Second
-	defaultRetryCount   = 10
-	defaultRetryWait    = 500 * time.Millisecond
-	defaultRetryMaxWait = 5 * time.Second
+	defaultTimeout      = 10 * time.Second
+	defaultRetryCount   = 2
+	defaultRetryWait    = 300 * time.Millisecond
+	defaultRetryMaxWait = 1 * time.Second
 )
 
 type Credentials struct {
@@ -27,6 +26,30 @@ type Credentials struct {
 }
 
 func NewClient(creds Credentials) *resty.Client {
+	client := newBaseClient()
+	client.SetPreRequestHook(func(_ *resty.Client, req *http.Request) error {
+		ts := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+		method := req.Method
+		path := req.URL.RequestURI()
+
+		sign := signRequest(creds.Secret, ts, method, path, "")
+
+		req.Header.Set("OK-ACCESS-KEY", creds.APIKey)
+		req.Header.Set("OK-ACCESS-SIGN", sign)
+		req.Header.Set("OK-ACCESS-TIMESTAMP", ts)
+		req.Header.Set("OK-ACCESS-PASSPHRASE", creds.Passphrase)
+		req.Header.Set("Content-Type", "application/json")
+
+		return nil
+	})
+	return client
+}
+
+func NewPublicClient() *resty.Client {
+	return newBaseClient()
+}
+
+func newBaseClient() *resty.Client {
 	client := resty.New().
 		SetTimeout(defaultTimeout).
 		SetRetryCount(defaultRetryCount).
@@ -43,23 +66,6 @@ func NewClient(creds Credentials) *resty.Client {
 		code := resp.StatusCode()
 		return code == http.StatusTooManyRequests || code >= http.StatusInternalServerError
 	})
-
-	client.SetPreRequestHook(func(_ *resty.Client, req *http.Request) error {
-		ts := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
-		method := req.Method
-		path := req.URL.RequestURI()
-
-		sign := signRequest(creds.Secret, ts, method, path, "")
-
-		req.Header.Set("OK-ACCESS-KEY", creds.APIKey)
-		req.Header.Set("OK-ACCESS-SIGN", sign)
-		req.Header.Set("OK-ACCESS-TIMESTAMP", ts)
-		req.Header.Set("OK-ACCESS-PASSPHRASE", creds.Passphrase)
-		req.Header.Set("Content-Type", "application/json")
-
-		return nil
-	})
-
 	return client
 }
 
@@ -98,15 +104,6 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("okx: error %s: %s", e.Code, e.Msg)
 }
 
-func isAuthError(code string) bool {
-	switch code {
-	case "50100", "50101", "50102", "50103", "50104", "50105",
-		"50111", "50112", "50113", "50114", "50115":
-		return true
-	}
-	return false
-}
-
 func DoGet[T any](client *resty.Client, baseURL, path string, params map[string]string) (T, error) {
 	var result APIResponse[T]
 	var zero T
@@ -130,9 +127,6 @@ func DoGet[T any](client *resty.Client, baseURL, path string, params map[string]
 	}
 
 	if result.Code != "0" {
-		if isAuthError(result.Code) {
-			log.Printf("[okx] auth error on %s %s: code=%s msg=%s", "GET", path, result.Code, result.Msg)
-		}
 		return zero, &APIError{Code: result.Code, Msg: result.Msg}
 	}
 

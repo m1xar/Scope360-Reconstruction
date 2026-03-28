@@ -12,7 +12,6 @@ import (
 func BuildPosition(
 	cp models.ClosedPosition,
 	orders []models.Order,
-	high, low *float64,
 ) (domain.Position, error) {
 	posID, err := uuid.NewV7()
 	if err != nil {
@@ -53,21 +52,6 @@ func BuildPosition(
 		}
 	}
 
-	var mae, mfe *float64
-	if high != nil && low != nil {
-		if side == "LONG" {
-			maeVal := Round8((*low - entry) * amount)
-			mfeVal := Round8((*high - entry) * amount)
-			mae = &maeVal
-			mfe = &mfeVal
-		} else {
-			maeVal := Round8((entry - *high) * amount)
-			mfeVal := Round8((entry - *low) * amount)
-			mae = &maeVal
-			mfe = &mfeVal
-		}
-	}
-
 	var rr, rrPlanned *float64
 	if sl != nil {
 		slDist := math.Abs(*sl-entry) * amount
@@ -86,7 +70,7 @@ func BuildPosition(
 	return domain.Position{
 		ID:         posID,
 		Side:       side,
-		Pair:       cp.InstId,
+		Pair:       NormalizePair(cp.InstId),
 		Amount:     Round8(amount),
 		EntryPrice: Round8(entry),
 		ExitPrice:  Round8(exit),
@@ -94,8 +78,8 @@ func BuildPosition(
 		NetPnl:     Round8(net),
 		Commission: Round8(fee),
 		Funding:    Round8(funding),
-		MAE:        mae,
-		MFE:        mfe,
+		MAE:        nil,
+		MFE:        nil,
 		TP:         tp,
 		SL:         sl,
 		RR:         rr,

@@ -9,7 +9,6 @@ import (
 )
 
 const historyCandlesPath = "/api/v5/market/history-candles"
-const candlesPath = "/api/v5/market/candles"
 
 func FetchCandles(client *resty.Client, baseURL, instId, bar string, startMs, endMs int64) ([]models.Candle, error) {
 	var result []models.Candle

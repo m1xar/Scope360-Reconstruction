@@ -107,3 +107,22 @@ func GetHighLow(candles []models.Candle) (high, low *float64) {
 func IsFilled(order models.Order) bool {
 	return MustFloat(order.AccFillSz) > 0
 }
+
+func NormalizePair(instId string) string {
+	second := strings.Index(instId[strings.Index(instId, "-")+1:], "-")
+	base := instId
+	if first := strings.Index(instId, "-"); first != -1 && second != -1 {
+		base = instId[:first+1+second]
+	}
+	return stripSpecial(base)
+}
+
+func stripSpecial(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}

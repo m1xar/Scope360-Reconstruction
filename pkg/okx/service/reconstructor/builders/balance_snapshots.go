@@ -2,11 +2,17 @@ package builders
 
 import (
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/domain"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/connector/okx/models"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/service/reconstructor/helpers"
+)
+
+const (
+	depositStateSuccess    = "2"
+	withdrawalStateSuccess = "2"
 )
 
 type balanceEvent struct {
@@ -34,7 +40,7 @@ func BuildBalanceSnapshots(
 	}
 
 	for _, d := range deposits {
-		if d.State != "2" {
+		if d.State != depositStateSuccess || !strings.Contains(strings.ToUpper(d.Ccy), "USD") {
 			continue
 		}
 		events = append(events, balanceEvent{
@@ -44,7 +50,7 @@ func BuildBalanceSnapshots(
 	}
 
 	for _, w := range withdrawals {
-		if w.State != "2" {
+		if w.State != withdrawalStateSuccess || !strings.Contains(strings.ToUpper(w.Ccy), "USD") {
 			continue
 		}
 		events = append(events, balanceEvent{

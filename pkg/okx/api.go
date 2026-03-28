@@ -64,7 +64,7 @@ func GetBuiltPositions(
 	for i, cp := range closedPositions {
 		posOrders := helpers.MatchOrdersToPosition(cp, ordersByInst)
 
-		pos, err := helpers.BuildPosition(cp, posOrders, nil, nil)
+		pos, err := helpers.BuildPosition(cp, posOrders)
 		if err != nil {
 			continue
 		}
@@ -115,8 +115,14 @@ func GetBuiltPositions(
 
 	balance, err := executors.FetchBalance(client, baseURL)
 	if err == nil {
-		deposits, _ := executors.FetchAllDeposits(client, baseURL)
-		withdrawals, _ := executors.FetchAllWithdrawals(client, baseURL)
+		deposits, depErr := executors.FetchAllDeposits(client, baseURL)
+		if depErr != nil {
+			deposits = nil
+		}
+		withdrawals, wdErr := executors.FetchAllWithdrawals(client, baseURL)
+		if wdErr != nil {
+			withdrawals = nil
+		}
 		snapshots := builders.BuildBalanceSnapshots(
 			helpers.MustFloat(balance.TotalEq), closedPositions, deposits, withdrawals,
 		)
@@ -275,7 +281,7 @@ func GetCandles(
 	startTime time.Time,
 	endTime time.Time,
 ) ([]models.Candle, error) {
-	client := okxclient.NewClient(okxclient.Credentials{})
+	client := okxclient.NewPublicClient()
 
 	if endTime.Before(startTime) {
 		return nil, fmt.Errorf("endTime must be >= startTime")

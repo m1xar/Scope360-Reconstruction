@@ -2,7 +2,6 @@ package executors
 
 import (
 	"errors"
-	"log"
 
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/connector/okx"
 )
@@ -32,8 +31,7 @@ func mergeInstTypeResults[T any](swapData []T, swapErr error, futuresData []T, f
 	}
 
 	if isHTTP5xx(swapErr) && isHTTP5xx(futuresErr) {
-		log.Printf("[okx] both SWAP and FUTURES returned 5xx (transient OKX error), returning empty: swap=%v, futures=%v", swapErr, futuresErr)
-		return nil, nil
+		return nil, swapErr
 	}
 
 	if !isHTTP5xx(swapErr) {

@@ -1,6 +1,8 @@
 package executors
 
 import (
+	"sync"
+
 	"github.com/go-resty/resty/v2"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/connector/okx"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/connector/okx/models"
@@ -9,20 +11,20 @@ import (
 const positionsPath = "/api/v5/account/positions"
 
 func FetchOpenPositions(client *resty.Client, baseURL string) ([]models.OpenPosition, error) {
-	params := map[string]string{
-		"instType": "SWAP",
-	}
+	var swaps, futures []models.OpenPosition
+	var swapErr, futuresErr error
+	var wg sync.WaitGroup
 
-	swaps, err := okx.DoGet[[]models.OpenPosition](client, baseURL, positionsPath, params)
-	if err != nil {
-		return nil, err
-	}
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		swaps, swapErr = okx.DoGet[[]models.OpenPosition](client, baseURL, positionsPath, map[string]string{"instType": "SWAP"})
+	}()
+	go func() {
+		defer wg.Done()
+		futures, futuresErr = okx.DoGet[[]models.OpenPosition](client, baseURL, positionsPath, map[string]string{"instType": "FUTURES"})
+	}()
+	wg.Wait()
 
-	params["instType"] = "FUTURES"
-	futures, err := okx.DoGet[[]models.OpenPosition](client, baseURL, positionsPath, params)
-	if err != nil {
-		return nil, err
-	}
-
-	return append(swaps, futures...), nil
+	return mergeInstTypeResults(swaps, swapErr, futures, futuresErr)
 }

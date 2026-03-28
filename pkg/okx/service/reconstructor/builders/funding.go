@@ -8,7 +8,7 @@ import (
 
 func BuildUserFunding(bill models.Bill) domain.UserFunding {
 	return domain.UserFunding{
-		Pair:      bill.InstId,
+		Pair:      helpers.NormalizePair(bill.InstId),
 		Amount:    helpers.Round8(helpers.MustFloat(bill.BalChg)),
 		CreatedAt: helpers.TimeFromMs(bill.Ts),
 	}
