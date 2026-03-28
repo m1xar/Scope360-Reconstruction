@@ -11,6 +11,7 @@ import (
 func BuildPosition(
 	cp models.ClosedPosition,
 	orders []models.Order,
+	algoOrders []models.AlgoOrder,
 ) (domain.Position, error) {
 	posID, err := uuid.NewV7()
 	if err != nil {
@@ -50,6 +51,16 @@ func BuildPosition(
 			tp = &rounded
 		}
 	}
+	for _, ao := range algoOrders {
+		if v := MustFloat(ao.SlTriggerPx); v > 0 && sl == nil {
+			rounded := Round8(v)
+			sl = &rounded
+		}
+		if v := MustFloat(ao.TpTriggerPx); v > 0 && tp == nil {
+			rounded := Round8(v)
+			tp = &rounded
+		}
+	}
 
 	var rr, rrPlanned *float64
 	if sl != nil {
@@ -61,6 +72,15 @@ func BuildPosition(
 				rrpVal := math.Abs(*tp-entry) / math.Abs(*sl-entry)
 				rrPlanned = &rrpVal
 			}
+		}
+	}
+
+	var liqPrice float64
+	if lever > 0 && cp.MgnMode == "isolated" {
+		if side == "LONG" {
+			liqPrice = Round8(entry * (1 - 1/MustFloat(cp.Lever)))
+		} else {
+			liqPrice = Round8(entry * (1 + 1/MustFloat(cp.Lever)))
 		}
 	}
 
@@ -89,10 +109,11 @@ func BuildPosition(
 		SL:         sl,
 		RR:         rr,
 		RRPlanned:  rrPlanned,
-		Isolated:   cp.MgnMode == "isolated",
-		Closed:     true,
-		Status:     &status,
-		Multiplier: uint32(lever),
+		LiquidationPrice: liqPrice,
+		Isolated:         cp.MgnMode == "isolated",
+		Closed:           true,
+		Status:           &status,
+		Multiplier:       uint32(lever),
 		CreatedAt:  start,
 		ClosedAt:   &end,
 		Orders:     domainOrders,

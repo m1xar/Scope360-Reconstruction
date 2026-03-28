@@ -2,7 +2,9 @@ package executors
 
 import (
 	"fmt"
+	"strconv"
 	"sync"
+	"time"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/connector/okx"
@@ -13,9 +15,12 @@ const positionsHistoryPath = "/api/v5/account/positions-history"
 
 const positionsPageLimit = 100
 
+const positionsMaxAge = 90 * 24 * time.Hour
+
 func FetchAllClosedPositionsByInstType(client *resty.Client, baseURL, instType string) ([]models.ClosedPosition, error) {
 	var result []models.ClosedPosition
 	after := ""
+	cutoffMs := time.Now().Add(-positionsMaxAge).UnixMilli()
 
 	for {
 		params := map[string]string{
@@ -36,7 +41,20 @@ func FetchAllClosedPositionsByInstType(client *resty.Client, baseURL, instType s
 		if len(page) == 0 {
 			break
 		}
-		result = append(result, page...)
+
+		reachedCutoff := false
+		for _, cp := range page {
+			utime, _ := strconv.ParseInt(cp.UTime, 10, 64)
+			if utime < cutoffMs {
+				reachedCutoff = true
+				break
+			}
+			result = append(result, cp)
+		}
+		if reachedCutoff {
+			break
+		}
+
 		if len(page) < positionsPageLimit {
 			break
 		}

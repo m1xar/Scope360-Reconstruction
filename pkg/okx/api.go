@@ -57,6 +57,9 @@ func GetBuiltPositions(
 	}
 	ordersByInst := helpers.GroupOrdersByInst(allOrders)
 
+	algoOrders, _ := executors.FetchAllSwapAndFuturesAlgoOrders(client, baseURL)
+	algoByInst := helpers.GroupAlgoOrdersByInst(algoOrders)
+
 	candleRequests := make(chan helpers.CandleRequest, defaultCandleWorkers)
 	workers.StartCandleWorkers(client, baseURL, candleRequests, defaultCandleWorkers)
 
@@ -70,8 +73,9 @@ func GetBuiltPositions(
 
 	for i, cp := range closedPositions {
 		posOrders := helpers.MatchOrdersToPosition(cp, ordersByInst)
+		posAlgoOrders := helpers.MatchAlgoOrdersToPosition(cp, algoByInst)
 
-		pos, err := helpers.BuildPosition(cp, posOrders)
+		pos, err := helpers.BuildPosition(cp, posOrders, posAlgoOrders)
 		if err != nil {
 			continue
 		}
@@ -122,18 +126,12 @@ func GetBuiltPositions(
 
 	balance, err := executors.FetchBalance(client, baseURL)
 	if err == nil {
-		deposits, depErr := executors.FetchAllDeposits(client, baseURL)
-		if depErr != nil {
-			deposits = nil
+		currentBal := helpers.MustFloat(balance.TotalEq)
+		bills, billsErr := executors.FetchAllSwapAndFuturesBills(client, baseURL, oldestMs)
+		if billsErr == nil && len(bills) > 0 {
+			snapshots := builders.BuildBalanceSnapshotsFromBills(currentBal, bills)
+			helpers.AttachBalanceInit(&positions, snapshots)
 		}
-		withdrawals, wdErr := executors.FetchAllWithdrawals(client, baseURL)
-		if wdErr != nil {
-			withdrawals = nil
-		}
-		snapshots := builders.BuildBalanceSnapshots(
-			helpers.MustFloat(balance.TotalEq), closedPositions, deposits, withdrawals,
-		)
-		helpers.AttachBalanceInit(&positions, snapshots)
 	}
 
 	return positions, nil
@@ -195,27 +193,19 @@ func GetBalanceSnapshots(
 	if err != nil {
 		return nil, err
 	}
+	currentBal := helpers.MustFloat(balance.TotalEq)
 
-	closedPositions, err := executors.FetchAllClosedPositions(client, baseURL)
-	if err != nil {
-		return nil, err
-	}
-
-	deposits, err := executors.FetchAllDeposits(client, baseURL)
-	if err != nil {
-		return nil, err
-	}
-
-	withdrawals, err := executors.FetchAllWithdrawals(client, baseURL)
-	if err != nil {
-		return nil, err
-	}
-
-	snapshots := builders.BuildBalanceSnapshots(
-		helpers.MustFloat(balance.TotalEq), closedPositions, deposits, withdrawals,
-	)
-
+	startMs := int64(0)
 	cutoff := helpers.CutoffFromDays(days)
+	if cutoff != nil {
+		startMs = cutoff.UnixMilli()
+	}
+
+	bills, err := executors.FetchAllSwapAndFuturesBills(client, baseURL, startMs)
+	if err != nil {
+		return nil, err
+	}
+	snapshots := builders.BuildBalanceSnapshotsFromBills(currentBal, bills)
 	if cutoff != nil {
 		filtered := snapshots[:0]
 		for _, s := range snapshots {
@@ -257,33 +247,31 @@ func GetFundings(
 		APIKey: apiKey, Secret: secret, Passphrase: passphrase,
 	})
 
-	closedPositions, err := executors.FetchAllClosedPositions(client, baseURL)
+	startMs := int64(0)
+	cutoff := helpers.CutoffFromDays(days)
+	if cutoff != nil {
+		startMs = cutoff.UnixMilli()
+	}
+
+	bills, err := executors.FetchAllSwapAndFuturesBills(client, baseURL, startMs)
 	if err != nil {
 		return nil, err
 	}
 
-	fundings := make([]domain.UserFunding, 0, len(closedPositions))
-	for _, cp := range closedPositions {
-		funding := helpers.MustFloat(cp.FundingFee)
-		if funding == 0 {
+	fundings := make([]domain.UserFunding, 0, len(bills))
+	for _, b := range bills {
+		if b.Type != "8" {
+			continue
+		}
+		amount := helpers.MustFloat(b.BalChg)
+		if amount == 0 {
 			continue
 		}
 		fundings = append(fundings, domain.UserFunding{
-			Pair:      helpers.NormalizePair(cp.InstId),
-			Amount:    helpers.Round8(funding),
-			CreatedAt: helpers.TimeFromMs(cp.UTime),
+			Pair:      helpers.NormalizePair(b.InstId),
+			Amount:    helpers.Round8(amount),
+			CreatedAt: helpers.TimeFromMs(b.Ts),
 		})
-	}
-
-	cutoff := helpers.CutoffFromDays(days)
-	if cutoff != nil {
-		filtered := fundings[:0]
-		for _, f := range fundings {
-			if !f.CreatedAt.Before(*cutoff) {
-				filtered = append(filtered, f)
-			}
-		}
-		fundings = filtered
 	}
 
 	return fundings, nil

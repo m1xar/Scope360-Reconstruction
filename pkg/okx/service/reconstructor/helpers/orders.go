@@ -14,6 +14,14 @@ func GroupOrdersByInst(orders []models.Order) map[string][]models.Order {
 	return idx
 }
 
+func GroupAlgoOrdersByInst(orders []models.AlgoOrder) map[string][]models.AlgoOrder {
+	idx := make(map[string][]models.AlgoOrder)
+	for _, o := range orders {
+		idx[o.InstId] = append(idx[o.InstId], o)
+	}
+	return idx
+}
+
 func MatchOrdersToPosition(cp models.ClosedPosition, ordersByInst map[string][]models.Order) []models.Order {
 	instOrders := ordersByInst[cp.InstId]
 	if len(instOrders) == 0 {
@@ -32,6 +40,31 @@ func MatchOrdersToPosition(cp models.ClosedPosition, ordersByInst map[string][]m
 		}
 
 		ordTime := MustInt64(ord.UTime)
+		if ordTime >= startMs && ordTime <= endMs {
+			matched = append(matched, ord)
+		}
+	}
+	return matched
+}
+
+func MatchAlgoOrdersToPosition(cp models.ClosedPosition, algoByInst map[string][]models.AlgoOrder) []models.AlgoOrder {
+	instOrders := algoByInst[cp.InstId]
+	if len(instOrders) == 0 {
+		return nil
+	}
+
+	startMs := MustInt64(cp.CTime)
+	endMs := MustInt64(cp.UTime)
+	targetPosSide := directionToPosSide(cp.Direction)
+
+	matched := make([]models.AlgoOrder, 0)
+	for _, ord := range instOrders {
+		ordPosSide := strings.ToLower(ord.PosSide)
+		if ordPosSide != "" && ordPosSide != "net" && targetPosSide != "" && ordPosSide != targetPosSide {
+			continue
+		}
+
+		ordTime := MustInt64(ord.CTime)
 		if ordTime >= startMs && ordTime <= endMs {
 			matched = append(matched, ord)
 		}
