@@ -1,6 +1,7 @@
 package executors
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/go-resty/resty/v2"
@@ -14,6 +15,8 @@ func FetchAllBills(client *resty.Client, baseURL string, billType string) ([]mod
 	return FetchAllSwapAndFuturesBills(client, baseURL, billType)
 }
 
+const billsPageLimit = 100
+
 func FetchAllBillsByInstType(client *resty.Client, baseURL, instType, billType string) ([]models.Bill, error) {
 	var result []models.Bill
 	after := ""
@@ -21,7 +24,7 @@ func FetchAllBillsByInstType(client *resty.Client, baseURL, instType, billType s
 	for {
 		params := map[string]string{
 			"instType": instType,
-			"limit":    "100",
+			"limit":    fmt.Sprintf("%d", billsPageLimit),
 		}
 		if billType != "" {
 			params["type"] = billType
@@ -32,12 +35,18 @@ func FetchAllBillsByInstType(client *resty.Client, baseURL, instType, billType s
 
 		page, err := okx.DoGet[[]models.Bill](client, baseURL, billsArchivePath, params)
 		if err != nil {
+			if after != "" && isHTTP5xx(err) {
+				break
+			}
 			return nil, err
 		}
 		if len(page) == 0 {
 			break
 		}
 		result = append(result, page...)
+		if len(page) < billsPageLimit {
+			break
+		}
 		after = page[len(page)-1].BillId
 	}
 

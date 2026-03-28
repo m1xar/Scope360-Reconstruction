@@ -1,6 +1,7 @@
 package executors
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/go-resty/resty/v2"
@@ -10,6 +11,8 @@ import (
 
 const ordersArchivePath = "/api/v5/trade/orders-history-archive"
 
+const ordersPageLimit = 100
+
 func FetchAllOrders(client *resty.Client, baseURL, instType string) ([]models.Order, error) {
 	var result []models.Order
 	after := ""
@@ -17,7 +20,7 @@ func FetchAllOrders(client *resty.Client, baseURL, instType string) ([]models.Or
 	for {
 		params := map[string]string{
 			"instType": instType,
-			"limit":    "100",
+			"limit":    fmt.Sprintf("%d", ordersPageLimit),
 		}
 		if after != "" {
 			params["after"] = after
@@ -25,12 +28,18 @@ func FetchAllOrders(client *resty.Client, baseURL, instType string) ([]models.Or
 
 		page, err := okx.DoGet[[]models.Order](client, baseURL, ordersArchivePath, params)
 		if err != nil {
+			if after != "" && isHTTP5xx(err) {
+				break
+			}
 			return nil, err
 		}
 		if len(page) == 0 {
 			break
 		}
 		result = append(result, page...)
+		if len(page) < ordersPageLimit {
+			break
+		}
 		after = page[len(page)-1].OrdId
 	}
 

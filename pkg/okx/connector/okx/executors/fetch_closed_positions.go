@@ -1,6 +1,7 @@
 package executors
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/go-resty/resty/v2"
@@ -10,6 +11,8 @@ import (
 
 const positionsHistoryPath = "/api/v5/account/positions-history"
 
+const positionsPageLimit = 100
+
 func FetchAllClosedPositionsByInstType(client *resty.Client, baseURL, instType string) ([]models.ClosedPosition, error) {
 	var result []models.ClosedPosition
 	after := ""
@@ -17,7 +20,7 @@ func FetchAllClosedPositionsByInstType(client *resty.Client, baseURL, instType s
 	for {
 		params := map[string]string{
 			"instType": instType,
-			"limit":    "100",
+			"limit":    fmt.Sprintf("%d", positionsPageLimit),
 		}
 		if after != "" {
 			params["after"] = after
@@ -25,12 +28,18 @@ func FetchAllClosedPositionsByInstType(client *resty.Client, baseURL, instType s
 
 		page, err := okx.DoGet[[]models.ClosedPosition](client, baseURL, positionsHistoryPath, params)
 		if err != nil {
+			if after != "" && isHTTP5xx(err) {
+				break
+			}
 			return nil, err
 		}
 		if len(page) == 0 {
 			break
 		}
 		result = append(result, page...)
+		if len(page) < positionsPageLimit {
+			break
+		}
 		after = page[len(page)-1].PosId
 	}
 
