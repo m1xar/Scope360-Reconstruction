@@ -10,6 +10,8 @@ import (
 
 const historyCandlesPath = "/api/v5/market/history-candles"
 
+const candlesPageLimit = 100
+
 func FetchCandles(client *resty.Client, baseURL, instId, bar string, startMs, endMs int64) ([]models.Candle, error) {
 	var result []models.Candle
 	after := fmt.Sprint(endMs)
@@ -19,7 +21,7 @@ func FetchCandles(client *resty.Client, baseURL, instId, bar string, startMs, en
 			"instId": instId,
 			"bar":    bar,
 			"after":  after,
-			"limit":  "100",
+			"limit":  fmt.Sprintf("%d", candlesPageLimit),
 		}
 		if startMs > 0 {
 			params["before"] = fmt.Sprint(startMs)
@@ -27,6 +29,9 @@ func FetchCandles(client *resty.Client, baseURL, instId, bar string, startMs, en
 
 		page, err := okx.DoGet[[]models.Candle](client, baseURL, historyCandlesPath, params)
 		if err != nil {
+			if len(result) > 0 && isHTTP5xx(err) {
+				break
+			}
 			return nil, err
 		}
 		if len(page) == 0 {
@@ -36,7 +41,7 @@ func FetchCandles(client *resty.Client, baseURL, instId, bar string, startMs, en
 		result = append(result, page...)
 		after = page[len(page)-1].Ts
 
-		if len(page) < 100 {
+		if len(page) < candlesPageLimit {
 			break
 		}
 	}

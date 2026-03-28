@@ -2,7 +2,6 @@ package helpers
 
 import (
 	"math"
-	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/domain"
@@ -35,7 +34,7 @@ func BuildPosition(
 		status = "win"
 	}
 
-	lever, _ := strconv.ParseUint(cp.Lever, 10, 32)
+	lever := uint32(MustFloat(cp.Lever))
 
 	var sl, tp *float64
 	for _, ord := range orders {
@@ -220,7 +219,17 @@ func ApplyMAEMFE(pos *domain.Position, high, low *float64) {
 		return
 	}
 	entry := pos.EntryPrice
+	exit := pos.ExitPrice
+
 	amount := pos.Amount
+	priceDelta := exit - entry
+	if pos.Side == "SHORT" {
+		priceDelta = entry - exit
+	}
+	if priceDelta != 0 {
+		amount = math.Abs(pos.Pnl / priceDelta)
+	}
+
 	if pos.Side == "LONG" {
 		maeVal := Round8((*low - entry) * amount)
 		mfeVal := Round8((*high - entry) * amount)
