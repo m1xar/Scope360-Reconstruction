@@ -1,14 +1,14 @@
 package workers
 
 import (
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/domain"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/domain"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/builders"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/models"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/envelope"
 	"sync"
 )
 
 func StartPositionBuilders(
-	in <-chan models.TradeEnvelope,
+	in <-chan envelope.TradeEnvelope,
 	out chan<- domain.Position,
 	workers int,
 ) {

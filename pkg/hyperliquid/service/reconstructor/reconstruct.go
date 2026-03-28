@@ -2,23 +2,18 @@ package reconstructor
 
 import (
 	"strings"
-	"time"
 
-	"github.com/go-resty/resty/v2"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/binance"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/executors"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/envelope"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
-	models2 "github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/models"
 )
 
 func ReconstructTrades(
 	fills []models.RawFill,
 	fundings []models.FundingHistoryItem,
 	orderIdx helpers.OrderIndex,
-	client *resty.Client,
-	endpoint string,
-	out chan<- models2.TradeEnvelope,
+	candleRequests chan<- helpers.CandleRequest,
+	out chan<- envelope.TradeEnvelope,
 ) {
 	matches, _ := helpers.MatchFillGroups(fills)
 	for _, match := range matches {
@@ -66,7 +61,7 @@ func ReconstructTrades(
 			}
 		}
 
-		env := models2.TradeEnvelope{
+		env := envelope.TradeEnvelope{
 			Fills:      cp,
 			StopLoss:   sl,
 			TakeProfit: tp,
@@ -74,33 +69,18 @@ func ReconstructTrades(
 			FillTypes:  fillTypes,
 		}
 
-		const interval = "1m"
-		intervalMs, _ := helpers.IntervalToMs(interval)
-		oldestAllowedMs := time.Now().UnixMilli() - intervalMs*5000
-
-		var candles []models.HyperliquidCandle
-		var err error
-		if cp[0].Time < oldestAllowedMs {
-			candles, err = binance.FetchFuturesKlinesPaged(
-				client,
-				symbol,
-				interval,
-				cp[0].Time,
-				cp[len(cp)-1].Time,
-				499,
-			)
-		} else {
-			candles, err = executors.FetchAllCandlesHyperliquid(
-				client,
-				endpoint,
-				symbol,
-				interval,
-				cp[0].Time,
-				cp[len(cp)-1].Time,
-			)
+		replyCh := make(chan helpers.CandleResponse, 1)
+		candleRequests <- helpers.CandleRequest{
+			Coin:     symbol,
+			Interval: "1m",
+			StartMs:  cp[0].Time,
+			EndMs:    cp[len(cp)-1].Time,
+			ReplyCh:  replyCh,
 		}
-		if err == nil {
-			env.High, env.Low = helpers.GetHighLowHyperliquid(candles)
+
+		resp := <-replyCh
+		if resp.Err == nil {
+			env.High, env.Low = helpers.GetHighLowHyperliquid(resp.Candles)
 		}
 
 		out <- env

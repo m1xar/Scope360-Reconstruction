@@ -313,3 +313,23 @@ func CutoffFromDays(days int) *time.Time {
 	cutoff := time.Now().AddDate(0, 0, -days)
 	return &cutoff
 }
+
+func CoinFromPair(pair string) string {
+	for _, suffix := range []string{"USDC", "USDT", "USD"} {
+		if strings.HasSuffix(pair, suffix) {
+			return strings.TrimSuffix(pair, suffix)
+		}
+	}
+	return pair
+}
+
+func FilterFillsByCoinAndTime(fills []models.RawFill, coin string, from time.Time) []models.RawFill {
+	fromMs := from.UnixMilli()
+	out := make([]models.RawFill, 0, len(fills))
+	for _, f := range fills {
+		if f.Coin == coin && f.Time >= fromMs {
+			out = append(out, f)
+		}
+	}
+	return out
+}

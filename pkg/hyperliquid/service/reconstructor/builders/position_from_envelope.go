@@ -5,14 +5,14 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/domain"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/domain"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/models"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/envelope"
 
 	"github.com/google/uuid"
 )
 
-func BuildPositionFromEnvelope(env models.TradeEnvelope) (domain.Position, error) {
+func BuildPositionFromEnvelope(env envelope.TradeEnvelope) (domain.Position, error) {
 	fills := env.Fills
 
 	first := fills[0]

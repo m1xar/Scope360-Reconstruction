@@ -3,16 +3,13 @@ package builders
 import (
 	"time"
 
-	"github.com/go-resty/resty/v2"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/executors"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/domain"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/domain"
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
 )
 
 func BuildOpenPositionsFromFills(
-	client *resty.Client,
-	endpoint string,
+	candleRequests chan<- helpers.CandleRequest,
 	fills []models.RawFill,
 ) []domain.OpenPosition {
 	if len(fills) == 0 {
@@ -65,11 +62,49 @@ func BuildOpenPositionsFromFills(
 		}
 	}
 
-	out := make([]domain.OpenPosition, 0, len(aggs))
-	coinPrice := make(map[string]float64, len(aggs))
+	coins := make(map[string]struct{})
+	for _, a := range aggs {
+		net := a.openSize - a.closeSize
+		if net > 0 {
+			coins[a.coin] = struct{}{}
+		}
+	}
+
+	if len(coins) == 0 {
+		return nil
+	}
+
 	nowMs := time.Now().UnixMilli()
-	const candleInterval = "1m"
 	const candleLookbackMs = int64(60 * 60 * 1000)
+
+	type priceReply struct {
+		coin    string
+		replyCh chan helpers.CandleResponse
+	}
+
+	replies := make([]priceReply, 0, len(coins))
+	for coin := range coins {
+		replyCh := make(chan helpers.CandleResponse, 1)
+		candleRequests <- helpers.CandleRequest{
+			Coin:     coin,
+			Interval: "1m",
+			StartMs:  nowMs - candleLookbackMs,
+			EndMs:    nowMs,
+			ReplyCh:  replyCh,
+		}
+		replies = append(replies, priceReply{coin: coin, replyCh: replyCh})
+	}
+
+	coinPrice := make(map[string]float64, len(coins))
+	for _, r := range replies {
+		resp := <-r.replyCh
+		if resp.Err == nil && len(resp.Candles) > 0 {
+			last := resp.Candles[len(resp.Candles)-1]
+			coinPrice[r.coin] = helpers.MustFloat(last.C)
+		}
+	}
+
+	out := make([]domain.OpenPosition, 0, len(aggs))
 	for _, a := range aggs {
 		net := a.openSize - a.closeSize
 		if net <= 0 {
@@ -78,24 +113,6 @@ func BuildOpenPositionsFromFills(
 		entry := 0.0
 		if a.openSize > 0 {
 			entry = a.openNotional / a.openSize
-		}
-
-		if _, ok := coinPrice[a.coin]; !ok {
-			startTime := nowMs - candleLookbackMs
-			candles, err := executors.FetchAllCandlesHyperliquid(
-				client,
-				endpoint,
-				a.coin,
-				candleInterval,
-				startTime,
-				nowMs,
-			)
-			if err == nil && len(candles) > 0 {
-				last := candles[len(candles)-1]
-				coinPrice[a.coin] = helpers.MustFloat(last.C)
-			} else {
-				coinPrice[a.coin] = 0
-			}
 		}
 
 		out = append(out, domain.OpenPosition{

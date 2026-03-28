@@ -1,4 +1,4 @@
-package models
+package envelope
 
 import (
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"

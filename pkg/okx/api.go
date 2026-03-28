@@ -1,0 +1,266 @@
+package okx
+
+import (
+	"fmt"
+	"sort"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/domain"
+	okxclient "github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/connector/okx"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/connector/okx/executors"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/connector/okx/models"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/service/reconstructor/builders"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/service/reconstructor/helpers"
+	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/service/reconstructor/workers"
+)
+
+const defaultCandleWorkers = 4
+
+func GetBuiltPositions(
+	region okxclient.Region,
+	apiKey, secret, passphrase string,
+	days int,
+) ([]domain.Position, error) {
+	baseURL := okxclient.BaseURL(region)
+	client := okxclient.NewClient(okxclient.Credentials{
+		APIKey: apiKey, Secret: secret, Passphrase: passphrase,
+	})
+
+	closedPositions, err := executors.FetchAllClosedPositions(client, baseURL)
+	if err != nil {
+		return nil, err
+	}
+	if len(closedPositions) == 0 {
+		return nil, nil
+	}
+
+	allOrders, err := executors.FetchAllSwapAndFuturesOrders(client, baseURL)
+	if err != nil {
+		return nil, err
+	}
+	ordersByInst := helpers.GroupOrdersByInst(allOrders)
+
+	candleRequests := make(chan helpers.CandleRequest, defaultCandleWorkers)
+	workers.StartCandleWorkers(client, baseURL, candleRequests, defaultCandleWorkers)
+
+	type pendingCandle struct {
+		idx     int
+		replyCh chan helpers.CandleResponse
+	}
+
+	pending := make([]pendingCandle, 0, len(closedPositions))
+	positions := make([]domain.Position, len(closedPositions))
+
+	for i, cp := range closedPositions {
+		posOrders := helpers.MatchOrdersToPosition(cp, ordersByInst)
+
+		pos, err := helpers.BuildPosition(cp, posOrders, nil, nil)
+		if err != nil {
+			continue
+		}
+		positions[i] = pos
+
+		replyCh := make(chan helpers.CandleResponse, 1)
+		candleRequests <- helpers.CandleRequest{
+			InstId:  cp.InstId,
+			Bar:     "1m",
+			StartMs: helpers.MustInt64(cp.CTime),
+			EndMs:   helpers.MustInt64(cp.UTime),
+			ReplyCh: replyCh,
+		}
+		pending = append(pending, pendingCandle{idx: i, replyCh: replyCh})
+	}
+	close(candleRequests)
+
+	for _, p := range pending {
+		resp := <-p.replyCh
+		if resp.Err == nil {
+			high, low := helpers.GetHighLow(resp.Candles)
+			helpers.ApplyMAEMFE(&positions[p.idx], high, low)
+		}
+	}
+
+	filtered := make([]domain.Position, 0, len(positions))
+	for _, pos := range positions {
+		if pos.ID != uuid.Nil {
+			filtered = append(filtered, pos)
+		}
+	}
+	positions = filtered
+
+	sort.Slice(positions, func(i, j int) bool {
+		return positions[i].ClosedAt.Before(*positions[j].ClosedAt)
+	})
+
+	cutoff := helpers.CutoffFromDays(days)
+	if cutoff != nil {
+		trimmed := positions[:0]
+		for _, pos := range positions {
+			if pos.ClosedAt != nil && !pos.ClosedAt.Before(*cutoff) {
+				trimmed = append(trimmed, pos)
+			}
+		}
+		positions = trimmed
+	}
+
+	balance, err := executors.FetchBalance(client, baseURL)
+	if err == nil {
+		bills, billErr := executors.FetchAllBills(client, baseURL, "")
+		if billErr == nil {
+			snapshots := builders.BuildBalanceSnapshots(helpers.MustFloat(balance.TotalEq), bills)
+			helpers.AttachBalanceInit(&positions, snapshots)
+		}
+	}
+
+	return positions, nil
+}
+
+func GetClosedPositionByExactMatch(
+	region okxclient.Region,
+	apiKey, secret, passphrase string,
+	pair string,
+	openedAt time.Time,
+	side string,
+) (*domain.Position, error) {
+	positions, err := GetBuiltPositions(region, apiKey, secret, passphrase, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range positions {
+		pos := &positions[i]
+		if pos.Pair == pair && pos.Side == side && pos.CreatedAt.Equal(openedAt) {
+			return pos, nil
+		}
+	}
+	return nil, nil
+}
+
+func GetOpenPositions(
+	region okxclient.Region,
+	apiKey, secret, passphrase string,
+) ([]domain.OpenPosition, error) {
+	baseURL := okxclient.BaseURL(region)
+	client := okxclient.NewClient(okxclient.Credentials{
+		APIKey: apiKey, Secret: secret, Passphrase: passphrase,
+	})
+
+	raw, err := executors.FetchOpenPositions(client, baseURL)
+	if err != nil {
+		return nil, err
+	}
+
+	positions := make([]domain.OpenPosition, 0, len(raw))
+	for _, r := range raw {
+		positions = append(positions, builders.BuildOpenPosition(r))
+	}
+	return positions, nil
+}
+
+func GetBalanceSnapshots(
+	region okxclient.Region,
+	apiKey, secret, passphrase string,
+	days int,
+) ([]domain.UserBalanceSnapshot, error) {
+	baseURL := okxclient.BaseURL(region)
+	client := okxclient.NewClient(okxclient.Credentials{
+		APIKey: apiKey, Secret: secret, Passphrase: passphrase,
+	})
+
+	balance, err := executors.FetchBalance(client, baseURL)
+	if err != nil {
+		return nil, err
+	}
+
+	bills, err := executors.FetchAllBills(client, baseURL, "")
+	if err != nil {
+		return nil, err
+	}
+
+	snapshots := builders.BuildBalanceSnapshots(helpers.MustFloat(balance.TotalEq), bills)
+
+	cutoff := helpers.CutoffFromDays(days)
+	if cutoff != nil {
+		filtered := snapshots[:0]
+		for _, s := range snapshots {
+			if !s.CreatedAt.Before(*cutoff) {
+				filtered = append(filtered, s)
+			}
+		}
+		snapshots = filtered
+	}
+
+	return snapshots, nil
+}
+
+func GetCurrentBalance(
+	region okxclient.Region,
+	apiKey, secret, passphrase string,
+) (*float64, error) {
+	baseURL := okxclient.BaseURL(region)
+	client := okxclient.NewClient(okxclient.Credentials{
+		APIKey: apiKey, Secret: secret, Passphrase: passphrase,
+	})
+
+	balance, err := executors.FetchBalance(client, baseURL)
+	if err != nil {
+		return nil, err
+	}
+
+	val := helpers.MustFloat(balance.TotalEq)
+	return &val, nil
+}
+
+func GetFundings(
+	region okxclient.Region,
+	apiKey, secret, passphrase string,
+	days int,
+) ([]domain.UserFunding, error) {
+	baseURL := okxclient.BaseURL(region)
+	client := okxclient.NewClient(okxclient.Credentials{
+		APIKey: apiKey, Secret: secret, Passphrase: passphrase,
+	})
+
+	bills, err := executors.FetchFundingBills(client, baseURL)
+	if err != nil {
+		return nil, err
+	}
+
+	fundings := make([]domain.UserFunding, 0, len(bills))
+	for _, b := range bills {
+		fundings = append(fundings, builders.BuildUserFunding(b))
+	}
+
+	cutoff := helpers.CutoffFromDays(days)
+	if cutoff != nil {
+		filtered := fundings[:0]
+		for _, f := range fundings {
+			if !f.CreatedAt.Before(*cutoff) {
+				filtered = append(filtered, f)
+			}
+		}
+		fundings = filtered
+	}
+
+	return fundings, nil
+}
+
+func GetCandles(
+	baseURL string,
+	instId string,
+	bar string,
+	startTime time.Time,
+	endTime time.Time,
+) ([]models.Candle, error) {
+	client := okxclient.NewClient(okxclient.Credentials{})
+
+	if endTime.Before(startTime) {
+		return nil, fmt.Errorf("endTime must be >= startTime")
+	}
+
+	return executors.FetchCandles(
+		client, baseURL, instId, bar,
+		startTime.UnixMilli(), endTime.UnixMilli(),
+	)
+}
