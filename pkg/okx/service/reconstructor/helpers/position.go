@@ -65,7 +65,13 @@ func BuildPosition(
 		}
 	}
 
-	domainOrders := BuildOrders(orders, posID)
+	var domainOrders []domain.Order
+	if len(orders) > 0 {
+		domainOrders = BuildOrders(orders, posID)
+	}
+	if len(domainOrders) == 0 {
+		domainOrders = buildSyntheticOrders(cp, posID)
+	}
 
 	return domain.Position{
 		ID:         posID,
@@ -140,6 +146,73 @@ func BuildOrders(orders []models.Order, posID uuid.UUID) []domain.Order {
 	}
 
 	return result
+}
+
+func buildSyntheticOrders(cp models.ClosedPosition, posID uuid.UUID) []domain.Order {
+	entry := MustFloat(cp.OpenAvgPx)
+	exit := MustFloat(cp.CloseAvgPx)
+	amount := MustFloat(cp.OpenMaxPos)
+	fee := math.Abs(MustFloat(cp.Fee))
+	pnl := MustFloat(cp.RealizedPnl)
+	openTime := TimeFromMs(cp.CTime)
+	closeTime := TimeFromMs(cp.UTime)
+	side := SideFromDirection(cp.Direction)
+
+	openSide := "BUY"
+	closeSide := "SELL"
+	if side == "SHORT" {
+		openSide = "SELL"
+		closeSide = "BUY"
+	}
+
+	openID, _ := uuid.NewV7()
+	closeID, _ := uuid.NewV7()
+	halfFee := Round8(fee / 2)
+
+	return []domain.Order{
+		{
+			ID:            openID,
+			PositionID:    posID,
+			Type:          "MARKET",
+			Status:        "FILLED",
+			Side:          openSide,
+			Amount:        Round8(amount),
+			AmountFilled:  Round8(amount),
+			AveragePrice:  Round8(entry),
+			OriginalPrice: Round8(entry),
+			UpdatedAt:     openTime,
+			Trade: domain.Trade{
+				OrderID:    openID,
+				Side:       openSide,
+				Price:      Round8(entry),
+				Amount:     Round8(amount),
+				Commission: halfFee,
+				Profit:     0,
+				DoneAt:     openTime,
+			},
+		},
+		{
+			ID:            closeID,
+			PositionID:    posID,
+			Type:          "MARKET",
+			Status:        "FILLED",
+			Side:          closeSide,
+			Amount:        Round8(amount),
+			AmountFilled:  Round8(amount),
+			AveragePrice:  Round8(exit),
+			OriginalPrice: Round8(exit),
+			UpdatedAt:     closeTime,
+			Trade: domain.Trade{
+				OrderID:    closeID,
+				Side:       closeSide,
+				Price:      Round8(exit),
+				Amount:     Round8(amount),
+				Commission: halfFee,
+				Profit:     Round8(pnl),
+				DoneAt:     closeTime,
+			},
+		},
+	}
 }
 
 func ApplyMAEMFE(pos *domain.Position, high, low *float64) {

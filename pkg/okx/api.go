@@ -44,7 +44,14 @@ func GetBuiltPositions(
 		return []domain.Position{}, nil
 	}
 
-	allOrders, err := executors.FetchAllSwapAndFuturesOrders(client, baseURL)
+	oldestMs := helpers.MustInt64(closedPositions[0].CTime)
+	for _, cp := range closedPositions[1:] {
+		if t := helpers.MustInt64(cp.CTime); t < oldestMs {
+			oldestMs = t
+		}
+	}
+
+	allOrders, err := executors.FetchAllSwapAndFuturesOrders(client, baseURL, oldestMs)
 	if err != nil {
 		return nil, err
 	}
@@ -250,14 +257,22 @@ func GetFundings(
 		APIKey: apiKey, Secret: secret, Passphrase: passphrase,
 	})
 
-	bills, err := executors.FetchFundingBills(client, baseURL)
+	closedPositions, err := executors.FetchAllClosedPositions(client, baseURL)
 	if err != nil {
 		return nil, err
 	}
 
-	fundings := make([]domain.UserFunding, 0, len(bills))
-	for _, b := range bills {
-		fundings = append(fundings, builders.BuildUserFunding(b))
+	fundings := make([]domain.UserFunding, 0, len(closedPositions))
+	for _, cp := range closedPositions {
+		funding := helpers.MustFloat(cp.FundingFee)
+		if funding == 0 {
+			continue
+		}
+		fundings = append(fundings, domain.UserFunding{
+			Pair:      helpers.NormalizePair(cp.InstId),
+			Amount:    helpers.Round8(funding),
+			CreatedAt: helpers.TimeFromMs(cp.UTime),
+		})
 	}
 
 	cutoff := helpers.CutoffFromDays(days)

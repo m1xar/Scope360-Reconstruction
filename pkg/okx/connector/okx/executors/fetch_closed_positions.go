@@ -40,7 +40,7 @@ func FetchAllClosedPositionsByInstType(client *resty.Client, baseURL, instType s
 		if len(page) < positionsPageLimit {
 			break
 		}
-		after = page[len(page)-1].PosId
+		after = page[len(page)-1].UTime
 	}
 
 	return result, nil
