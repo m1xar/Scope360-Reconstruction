@@ -21,6 +21,7 @@ func FetchAllBillsByInstType(client *resty.Client, baseURL, instType, billType s
 	for {
 		params := map[string]string{
 			"instType": instType,
+			"limit":    "100",
 		}
 		if billType != "" {
 			params["type"] = billType
@@ -59,14 +60,7 @@ func FetchAllSwapAndFuturesBills(client *resty.Client, baseURL, billType string)
 	}()
 	wg.Wait()
 
-	if swapErr != nil {
-		return nil, swapErr
-	}
-	if futuresErr != nil {
-		return nil, futuresErr
-	}
-
-	return append(swapBills, futuresBills...), nil
+	return mergeInstTypeResults(swapBills, swapErr, futuresBills, futuresErr)
 }
 
 func FetchFundingBills(client *resty.Client, baseURL string) ([]models.Bill, error) {

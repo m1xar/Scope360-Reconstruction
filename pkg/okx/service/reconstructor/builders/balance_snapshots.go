@@ -2,6 +2,7 @@ package builders
 
 import (
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/domain"
@@ -18,7 +19,18 @@ func BuildBalanceSnapshots(currentBalance float64, bills []models.Bill) []domain
 	}
 
 	sort.Slice(bills, func(i, j int) bool {
-		return helpers.MustInt64(bills[i].Ts) > helpers.MustInt64(bills[j].Ts)
+		ti := helpers.MustInt64(bills[i].Ts)
+		tj := helpers.MustInt64(bills[j].Ts)
+		if ti != tj {
+			return ti > tj
+		}
+
+		bi, errI := strconv.ParseInt(bills[i].BillId, 10, 64)
+		bj, errJ := strconv.ParseInt(bills[j].BillId, 10, 64)
+		if errI == nil && errJ == nil {
+			return bi > bj
+		}
+		return bills[i].BillId > bills[j].BillId
 	})
 
 	snapshots := make([]domain.UserBalanceSnapshot, 0, len(bills)+1)
@@ -31,9 +43,19 @@ func BuildBalanceSnapshots(currentBalance float64, bills []models.Bill) []domain
 	balance := currentBalance
 	for _, bill := range bills {
 		balance -= helpers.MustFloat(bill.BalChg)
+
+		billTime := helpers.TimeFromMs(bill.Ts)
+		roundedBalance := helpers.Round8(balance)
+
+		lastIdx := len(snapshots) - 1
+		if lastIdx >= 0 && snapshots[lastIdx].CreatedAt.Equal(billTime) {
+			snapshots[lastIdx].Balance = roundedBalance
+			continue
+		}
+
 		snapshots = append(snapshots, domain.UserBalanceSnapshot{
-			CreatedAt: helpers.TimeFromMs(bill.Ts),
-			Balance:   helpers.Round8(balance),
+			CreatedAt: billTime,
+			Balance:   roundedBalance,
 		})
 	}
 

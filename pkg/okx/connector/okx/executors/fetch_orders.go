@@ -17,6 +17,7 @@ func FetchAllOrders(client *resty.Client, baseURL, instType string) ([]models.Or
 	for {
 		params := map[string]string{
 			"instType": instType,
+			"limit":    "100",
 		}
 		if after != "" {
 			params["after"] = after
@@ -52,12 +53,5 @@ func FetchAllSwapAndFuturesOrders(client *resty.Client, baseURL string) ([]model
 	}()
 	wg.Wait()
 
-	if swapErr != nil {
-		return nil, swapErr
-	}
-	if futuresErr != nil {
-		return nil, futuresErr
-	}
-
-	return append(swapOrders, futuresOrders...), nil
+	return mergeInstTypeResults(swapOrders, swapErr, futuresOrders, futuresErr)
 }
