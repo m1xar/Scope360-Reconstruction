@@ -11,7 +11,6 @@ import (
 func BuildPosition(
 	cp models.ClosedPosition,
 	orders []models.Order,
-	algoOrders []models.AlgoOrder,
 ) (domain.Position, error) {
 	posID, err := uuid.NewV7()
 	if err != nil {
@@ -47,16 +46,6 @@ func BuildPosition(
 			sl = &rounded
 		}
 		if v := MustFloat(ord.TpTriggerPx); v > 0 && tp == nil {
-			rounded := Round8(v)
-			tp = &rounded
-		}
-	}
-	for _, ao := range algoOrders {
-		if v := MustFloat(ao.SlTriggerPx); v > 0 && sl == nil {
-			rounded := Round8(v)
-			sl = &rounded
-		}
-		if v := MustFloat(ao.TpTriggerPx); v > 0 && tp == nil {
 			rounded := Round8(v)
 			tp = &rounded
 		}

@@ -57,9 +57,6 @@ func GetBuiltPositions(
 	}
 	ordersByInst := helpers.GroupOrdersByInst(allOrders)
 
-	algoOrders, _ := executors.FetchAllSwapAndFuturesAlgoOrders(client, baseURL)
-	algoByInst := helpers.GroupAlgoOrdersByInst(algoOrders)
-
 	candleRequests := make(chan helpers.CandleRequest, defaultCandleWorkers)
 	workers.StartCandleWorkers(client, baseURL, candleRequests, defaultCandleWorkers)
 
@@ -73,9 +70,7 @@ func GetBuiltPositions(
 
 	for i, cp := range closedPositions {
 		posOrders := helpers.MatchOrdersToPosition(cp, ordersByInst)
-		posAlgoOrders := helpers.MatchAlgoOrdersToPosition(cp, algoByInst)
-
-		pos, err := helpers.BuildPosition(cp, posOrders, posAlgoOrders)
+		pos, err := helpers.BuildPosition(cp, posOrders)
 		if err != nil {
 			continue
 		}
