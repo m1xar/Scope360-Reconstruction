@@ -3,6 +3,7 @@ package builders
 import (
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -128,6 +129,7 @@ func BuildPositionFromEnvelope(env envelope.TradeEnvelope) (domain.Position, err
 	}
 
 	pair := helpers.NormalizeSymbol(first.Symbol)
+	isolated := strings.EqualFold(strings.TrimSpace(first.MarginMode), "ISOLATED")
 
 	return domain.Position{
 		ID:         positionID,
@@ -146,7 +148,7 @@ func BuildPositionFromEnvelope(env envelope.TradeEnvelope) (domain.Position, err
 		SL:         env.StopLoss,
 		RR:         rr,
 		RRPlanned:  rrPlanned,
-		Isolated:   true,
+		Isolated:   isolated,
 		Closed:     true,
 		Status:     &status,
 		CreatedAt:  start,
