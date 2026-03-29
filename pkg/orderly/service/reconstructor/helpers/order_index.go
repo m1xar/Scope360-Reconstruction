@@ -1,8 +1,6 @@
 package helpers
 
-import (
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/connector/orderly/models"
-)
+import "github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/connector/orderly/models"
 
 func BuildOrderMap(orders []models.OrderlyOrder) map[int64]models.OrderlyOrder {
 	m := make(map[int64]models.OrderlyOrder, len(orders))
@@ -27,53 +25,47 @@ func ExtractTPSL(
 	symbol string,
 	fromMs, toMs int64,
 ) (sl, tp *float64) {
+	const (
+		beforeOpenToleranceMs = int64(120000)
+		afterCloseToleranceMs = int64(60000)
+	)
+
 	orders, ok := idx[symbol]
 	if !ok {
 		return nil, nil
 	}
 
 	for _, o := range orders {
-		if o.CreatedTime < fromMs || o.CreatedTime > toMs {
+		if o.CreatedTime < fromMs-beforeOpenToleranceMs || o.CreatedTime > toMs+afterCloseToleranceMs {
+			continue
+		}
+		if o.AlgoType != "TP_SL" {
 			continue
 		}
 
-		if len(o.ChildOrders) > 0 {
-			for _, child := range o.ChildOrders {
-				extractFromAlgoOrder(&child, &sl, &tp)
+		for _, child := range o.ChildOrders {
+			if child.TriggerPrice == 0 {
+				continue
 			}
-			if sl != nil || tp != nil {
+			switch child.AlgoType {
+			case "TAKE_PROFIT":
+				if tp == nil {
+					p := Round8(child.TriggerPrice)
+					tp = &p
+				}
+			case "STOP_LOSS":
+				if sl == nil {
+					p := Round8(child.TriggerPrice)
+					sl = &p
+				}
+			}
+			if sl != nil && tp != nil {
 				return sl, tp
 			}
-		}
-
-		extractFromAlgoOrder(&o, &sl, &tp)
-		if sl != nil && tp != nil {
-			return sl, tp
 		}
 	}
 
 	return sl, tp
-}
-
-func extractFromAlgoOrder(o *models.OrderlyAlgoOrder, sl, tp **float64) {
-	if o.TriggerPrice == 0 {
-		return
-	}
-
-	price := Round8(o.TriggerPrice)
-
-	switch o.AlgoType {
-	case "STOP":
-		*sl = &price
-	case "TPSL", "positional_TPSL", "TP_SL":
-
-		if o.Side == "BUY" {
-
-			*tp = &price
-		} else {
-			*sl = &price
-		}
-	}
 }
 
 func ExtractFunding(

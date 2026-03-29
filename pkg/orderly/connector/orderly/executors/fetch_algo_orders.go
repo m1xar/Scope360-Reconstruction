@@ -34,7 +34,7 @@ func FetchAlgoOrders(
 	filtered := make([]models.OrderlyAlgoOrder, 0, len(all))
 	for _, o := range all {
 		switch o.AlgoType {
-		case "STOP", "TPSL", "positional_TPSL", "TP_SL":
+		case "TP_SL":
 			filtered = append(filtered, o)
 		}
 	}
