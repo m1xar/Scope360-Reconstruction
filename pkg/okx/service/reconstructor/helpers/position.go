@@ -21,9 +21,9 @@ func BuildPosition(
 	exit := MustFloat(cp.CloseAvgPx)
 	amount := MustFloat(cp.OpenMaxPos)
 	pnl := MustFloat(cp.Pnl)
-	fee := math.Abs(MustFloat(cp.Fee))
 	funding := MustFloat(cp.FundingFee)
 	net := MustFloat(cp.RealizedPnl)
+	fee := pnl - net + funding
 
 	side := SideFromDirection(cp.Direction)
 	start := TimeFromMs(cp.CTime)
@@ -79,6 +79,17 @@ func BuildPosition(
 	}
 	if len(domainOrders) == 0 {
 		domainOrders = buildSyntheticOrders(cp, posID)
+	}
+
+	if len(domainOrders) > 0 {
+		var orderFeeSum float64
+		for _, o := range domainOrders {
+			orderFeeSum += o.Trade.Commission
+		}
+		if gap := Round8(fee - orderFeeSum); gap != 0 {
+			last := &domainOrders[len(domainOrders)-1]
+			last.Trade.Commission = Round8(last.Trade.Commission + gap)
+		}
 	}
 
 	return domain.Position{
