@@ -6,13 +6,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/domain"
-	okxclient "github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/connector/okx"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/connector/okx/executors"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/connector/okx/models"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/service/reconstructor/builders"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/service/reconstructor/helpers"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/service/reconstructor/workers"
+	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	okxclient "github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx"
+	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/executors"
+	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/models"
+	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/builders"
+	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/helpers"
+	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/workers"
 )
 
 const defaultCandleWorkers = 4

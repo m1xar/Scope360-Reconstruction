@@ -2,8 +2,8 @@ package workers
 
 import (
 	"github.com/go-resty/resty/v2"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/connector/okx/executors"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/service/reconstructor/helpers"
+	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/executors"
+	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/helpers"
 )
 
 func StartCandleWorkers(

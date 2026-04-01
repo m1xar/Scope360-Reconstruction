@@ -1,63 +1,28 @@
 package orderly
 
 import (
-	"crypto/ed25519"
 	"errors"
-	"math"
 	"sort"
-	"strings"
 	"time"
 
-	"github.com/go-resty/resty/v2"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/domain"
-	connector "github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/connector/orderly"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/connector/orderly/executors"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/connector/orderly/models"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/service/reconstructor"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/service/reconstructor/builders"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/service/reconstructor/envelope"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/service/reconstructor/helpers"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/service/reconstructor/workers"
+	connector "github.com/m1xar/scope360-reconstruction/pkg/orderly/connector/orderly"
+	"github.com/m1xar/scope360-reconstruction/pkg/orderly/connector/orderly/executors"
+	"github.com/m1xar/scope360-reconstruction/pkg/orderly/connector/orderly/models"
+	"github.com/m1xar/scope360-reconstruction/pkg/orderly/service/reconstructor"
+	"github.com/m1xar/scope360-reconstruction/pkg/orderly/service/reconstructor/builders"
+	"github.com/m1xar/scope360-reconstruction/pkg/orderly/service/reconstructor/helpers"
+
+	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 )
 
-const (
-	defaultPositionWorkers = 8
-	defaultCandleWorkers   = 4
-)
+func GetBuiltPositions(cfg connector.Config, days int) ([]domain.Position, error) {
+	client := connector.NewClient(cfg)
 
-type Config struct {
-	BaseURL        string
-	WalletAddress  string
-	BrokerID       string
-	Ed25519PubKey  string
-	Ed25519PrivKey ed25519.PrivateKey
-	HTTPClient     *resty.Client
-}
-
-func newClient(cfg Config) *connector.Client {
-	creds := connector.NewCredentials(
-		cfg.WalletAddress,
-		cfg.BrokerID,
-		cfg.Ed25519PubKey,
-		cfg.Ed25519PrivKey,
-	)
-
-	baseURL := cfg.BaseURL
-	if baseURL == "" {
-		baseURL = connector.MainnetBaseURL
-	}
-
-	return connector.NewClient(baseURL, creds, cfg.HTTPClient)
-}
-
-func GetBuiltPositions(cfg Config, days int) ([]domain.Position, error) {
-	client := newClient(cfg)
-
-	positions, err := reconstructClosedPositions(client, "")
+	positions, err := reconstructor.ReconstructClosedPositions(client, "")
 	if err != nil {
 		return nil, err
 	}
-	if err := enrichPositionsWithCurrentRisk(client, &positions); err != nil {
+	if err := builders.EnrichPositionsWithCurrentRisk(client, &positions); err != nil {
 		return nil, err
 	}
 	assetHistory, err := executors.FetchAssetHistory(client)
@@ -74,7 +39,7 @@ func GetBuiltPositions(cfg Config, days int) ([]domain.Position, error) {
 }
 
 func GetClosedPositionByExactMatch(
-	cfg Config,
+	cfg connector.Config,
 	pair string,
 	openedAt time.Time,
 	side string,
@@ -95,10 +60,10 @@ func GetClosedPositionByExactMatch(
 	return nil, nil
 }
 
-func GetBalanceSnapshots(cfg Config, days int) ([]domain.UserBalanceSnapshot, error) {
-	client := newClient(cfg)
+func GetBalanceSnapshots(cfg connector.Config, days int) ([]domain.UserBalanceSnapshot, error) {
+	client := connector.NewClient(cfg)
 
-	positions, err := reconstructClosedPositions(client, "")
+	positions, err := reconstructor.ReconstructClosedPositions(client, "")
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +84,7 @@ func GetBalanceSnapshots(cfg Config, days int) ([]domain.UserBalanceSnapshot, er
 	return snapshots, nil
 }
 
-func GetCurrentBalance(cfg Config) (*float64, error) {
+func GetCurrentBalance(cfg connector.Config) (*float64, error) {
 	snapshots, err := GetBalanceSnapshots(cfg, 0)
 	if err != nil {
 		return nil, err
@@ -132,112 +97,8 @@ func GetCurrentBalance(cfg Config) (*float64, error) {
 	return &balance, nil
 }
 
-func reconstructClosedPositions(client *connector.Client, symbol string) ([]domain.Position, error) {
-	trades, err := executors.FetchAllTrades(client, symbol, 0, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	orders, err := executors.FetchFilledOrders(client, symbol, 0, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	algoOrders, err := executors.FetchAlgoOrders(client, symbol, 0, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	fundings, err := executors.FetchAllFunding(client, symbol, 0, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	orderMap := helpers.BuildOrderMap(orders)
-	algoIdx := helpers.BuildAlgoOrderIndex(algoOrders)
-
-	candleRequests := make(chan helpers.CandleRequest, defaultCandleWorkers)
-	workers.StartCandleWorkers(client, candleRequests, defaultCandleWorkers)
-
-	envelopes := make(chan envelope.TradeEnvelope)
-	positionsCh := make(chan domain.Position)
-
-	go func() {
-		reconstructor.ReconstructTrades(trades, fundings, orderMap, algoIdx, candleRequests, envelopes)
-		close(envelopes)
-		close(candleRequests)
-	}()
-
-	workers.StartPositionBuilders(envelopes, positionsCh, defaultPositionWorkers)
-
-	positions := make([]domain.Position, 0)
-	for pos := range positionsCh {
-		positions = append(positions, pos)
-	}
-
-	sort.Slice(positions, func(i, j int) bool {
-		iClosedAt := positions[i].ClosedAt
-		jClosedAt := positions[j].ClosedAt
-		if iClosedAt == nil && jClosedAt == nil {
-			return i < j
-		}
-		if iClosedAt == nil {
-			return false
-		}
-		if jClosedAt == nil {
-			return true
-		}
-		return iClosedAt.Before(*jClosedAt)
-	})
-
-	return positions, nil
-}
-
-func enrichPositionsWithCurrentRisk(client *connector.Client, positions *[]domain.Position) error {
-	if positions == nil || len(*positions) == 0 {
-		return nil
-	}
-
-	resp, err := executors.FetchPositionsSnapshot(client)
-	if err != nil {
-		return err
-	}
-	if resp == nil || len(resp.Rows) == 0 {
-		return nil
-	}
-
-	type riskInfo struct {
-		leverage float64
-		liq      float64
-	}
-	byPair := make(map[string]riskInfo, len(resp.Rows))
-	for _, row := range resp.Rows {
-		pair := strings.ToUpper(strings.TrimSpace(helpers.NormalizeSymbol(row.Symbol)))
-		byPair[pair] = riskInfo{
-			leverage: row.Leverage,
-			liq:      row.EstLiqPrice,
-		}
-	}
-
-	for i := range *positions {
-		pair := strings.ToUpper(strings.TrimSpace((*positions)[i].Pair))
-		risk, ok := byPair[pair]
-		if !ok {
-			continue
-		}
-		if risk.leverage > 0 {
-			(*positions)[i].Multiplier = uint32(math.Round(risk.leverage))
-		}
-		if risk.liq > 0 {
-			(*positions)[i].LiquidationPrice = helpers.Round8(risk.liq)
-		}
-	}
-
-	return nil
-}
-
-func GetFundings(cfg Config, days int) ([]domain.UserFunding, error) {
-	client := newClient(cfg)
+func GetFundings(cfg connector.Config, days int) ([]domain.UserFunding, error) {
+	client := connector.NewClient(cfg)
 
 	var startTime int64
 	if days > 0 {
@@ -261,13 +122,13 @@ func GetFundings(cfg Config, days int) ([]domain.UserFunding, error) {
 }
 
 func GetCandles(
-	cfg Config,
+	cfg connector.Config,
 	coin string,
 	interval string,
 	startTime time.Time,
 	endTime time.Time,
 ) ([]models.OrderlyCandle, error) {
-	client := newClient(cfg)
+	client := connector.NewClient(cfg)
 
 	if endTime.Before(startTime) {
 		return nil, errors.New("endTime must be >= startTime")
@@ -285,8 +146,8 @@ func GetCandles(
 	return candles, nil
 }
 
-func GetOpenPositions(cfg Config) ([]domain.OpenPosition, error) {
-	client := newClient(cfg)
+func GetOpenPositions(cfg connector.Config) ([]domain.OpenPosition, error) {
+	client := connector.NewClient(cfg)
 
 	positions, err := executors.FetchOpenPositions(client)
 	if err != nil {

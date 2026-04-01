@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/connector/orderly/models"
+	"github.com/m1xar/scope360-reconstruction/pkg/orderly/connector/orderly/models"
 )
 
 func Round8(val float64) float64 {

@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/connector/okx"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/connector/okx/models"
+	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx"
+	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/models"
 )
 
 const billsArchivePath = "/api/v5/account/bills-archive"

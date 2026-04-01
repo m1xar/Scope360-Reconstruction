@@ -3,7 +3,7 @@ package helpers
 import (
 	"time"
 
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 )
 
 func FilterPositionsByCreatedAt(positions []domain.Position, cutoff *time.Time) []domain.Position {

@@ -4,8 +4,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/domain"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/service/reconstructor/helpers"
+	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/orderly/service/reconstructor/helpers"
 )
 
 func AttachBalanceInitToPositions(

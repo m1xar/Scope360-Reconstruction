@@ -3,9 +3,9 @@ package builders
 import (
 	"math"
 
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/domain"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/connector/okx/models"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/service/reconstructor/helpers"
+	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/models"
+	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/helpers"
 )
 
 func BuildOpenPosition(pos models.OpenPosition) domain.OpenPosition {

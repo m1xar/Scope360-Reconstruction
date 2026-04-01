@@ -3,7 +3,7 @@ package helpers
 import (
 	"strings"
 
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/connector/okx/models"
+	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/models"
 )
 
 func GroupOrdersByInst(orders []models.Order) map[string][]models.Order {

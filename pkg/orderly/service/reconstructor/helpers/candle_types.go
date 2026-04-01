@@ -1,7 +1,7 @@
 package helpers
 
 import (
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/connector/orderly/models"
+	"github.com/m1xar/scope360-reconstruction/pkg/orderly/connector/orderly/models"
 )
 
 type CandleRequest struct {

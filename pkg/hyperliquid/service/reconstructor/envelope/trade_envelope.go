@@ -1,7 +1,7 @@
 package envelope
 
 import (
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
+	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
 )
 
 type TradeEnvelope struct {

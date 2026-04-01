@@ -4,8 +4,8 @@ import (
 	"math"
 
 	"github.com/google/uuid"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/domain"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/connector/okx/models"
+	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/models"
 )
 
 func BuildPosition(

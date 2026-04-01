@@ -3,9 +3,9 @@ package workers
 import (
 	"sync"
 
-	orderly "github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/connector/orderly"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/connector/orderly/executors"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/service/reconstructor/helpers"
+	orderly "github.com/m1xar/scope360-reconstruction/pkg/orderly/connector/orderly"
+	"github.com/m1xar/scope360-reconstruction/pkg/orderly/connector/orderly/executors"
+	"github.com/m1xar/scope360-reconstruction/pkg/orderly/service/reconstructor/helpers"
 )
 
 func StartCandleWorkers(

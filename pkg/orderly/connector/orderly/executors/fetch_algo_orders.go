@@ -3,8 +3,8 @@ package executors
 import (
 	"strconv"
 
-	orderly "github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/connector/orderly"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/connector/orderly/models"
+	orderly "github.com/m1xar/scope360-reconstruction/pkg/orderly/connector/orderly"
+	"github.com/m1xar/scope360-reconstruction/pkg/orderly/connector/orderly/models"
 )
 
 const algoOrdersPageSize = 100

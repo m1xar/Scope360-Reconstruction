@@ -3,9 +3,9 @@ package workers
 import (
 	"sync"
 
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/domain"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/service/reconstructor/builders"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/service/reconstructor/envelope"
+	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/orderly/service/reconstructor/builders"
+	"github.com/m1xar/scope360-reconstruction/pkg/orderly/service/reconstructor/envelope"
 )
 
 func StartPositionBuilders(

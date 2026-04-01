@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/go-resty/resty/v2"
-	hlmodels "github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
+	hlmodels "github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
 )
 
 const futuresBaseURL = "https://fapi.binance.com"

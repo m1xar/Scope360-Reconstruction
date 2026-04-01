@@ -3,7 +3,7 @@ package executors
 import (
 	"errors"
 
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/okx/connector/okx"
+	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx"
 )
 
 func isHTTP5xx(err error) bool {

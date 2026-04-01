@@ -6,15 +6,15 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/binance"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/executors"
-	hlmodels "github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/domain"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/builders"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/envelope"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
-	"github.com/m1xar/Hyperliquid_Reconstruction/pkg/hyperliquid/service/reconstructor/workers"
+	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/binance"
+	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/hyperliquid/executors"
+	hlmodels "github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
+	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor"
+	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor/builders"
+	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor/envelope"
+	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
+	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor/workers"
 )
 
 const (

@@ -1,6 +1,7 @@
 package orderly
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,15 @@ import (
 
 	"github.com/go-resty/resty/v2"
 )
+
+type Config struct {
+	BaseURL        string
+	WalletAddress  string
+	BrokerID       string
+	Ed25519PubKey  string
+	Ed25519PrivKey ed25519.PrivateKey
+	HTTPClient     *resty.Client
+}
 
 const (
 	defaultTimeout = 20 * time.Second
@@ -23,10 +33,24 @@ type Client struct {
 	creds   Credentials
 }
 
-func NewClient(baseURL string, creds Credentials, httpClient *resty.Client) *Client {
+func NewClient(cfg Config) *Client {
+	creds := NewCredentials(
+		cfg.WalletAddress,
+		cfg.BrokerID,
+		cfg.Ed25519PubKey,
+		cfg.Ed25519PrivKey,
+	)
+
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = MainnetBaseURL
+	}
+
+	httpClient := cfg.HTTPClient
 	if httpClient == nil {
 		httpClient = resty.New().SetTimeout(defaultTimeout)
 	}
+
 	return &Client{
 		http:    httpClient,
 		baseURL: strings.TrimRight(baseURL, "/"),

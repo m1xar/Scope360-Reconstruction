@@ -1,4 +1,4 @@
-module github.com/m1xar/Hyperliquid_Reconstruction
+module github.com/m1xar/scope360-reconstruction
 
 go 1.25
 

@@ -1,6 +1,6 @@
 package helpers
 
-import "github.com/m1xar/Hyperliquid_Reconstruction/pkg/orderly/connector/orderly/models"
+import "github.com/m1xar/scope360-reconstruction/pkg/orderly/connector/orderly/models"
 
 func BuildOrderMap(orders []models.OrderlyOrder) map[int64]models.OrderlyOrder {
 	m := make(map[int64]models.OrderlyOrder, len(orders))
