@@ -22,7 +22,7 @@ func FetchAllFundingRecords(client *resty.Client) ([]models.FundingRecord, error
 			"page_size": fmt.Sprint(fundingPageSize),
 		}
 
-		data, err := mexc.DoGet[[]models.FundingRecord](client, fundingRecordsPath, params)
+		data, err := mexc.DoGetPaginated[models.FundingRecord](client, fundingRecordsPath, params)
 		if err != nil {
 			if page > 1 && isHTTP5xx(err) {
 				break

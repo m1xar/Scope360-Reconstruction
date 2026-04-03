@@ -30,5 +30,9 @@ func FetchCandles(client *resty.Client, symbol, interval string, startMs, endMs 
 		"end":      fmt.Sprint(endMs / 1000),
 	}
 
-	return mexc.DoGet[[]models.Candle](client, path, params)
+	columnar, err := mexc.DoGet[models.CandleColumnar](client, path, params)
+	if err != nil {
+		return nil, err
+	}
+	return columnar.ToCandles(), nil
 }

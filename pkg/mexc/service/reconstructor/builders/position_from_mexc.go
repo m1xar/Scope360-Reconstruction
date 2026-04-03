@@ -1,7 +1,6 @@
 package builders
 
 import (
-	"fmt"
 	"math"
 
 	"github.com/google/uuid"
@@ -157,7 +156,7 @@ func BuildOrders(orders []models.Order, posID uuid.UUID) []domain.Order {
 		result = append(result, domain.Order{
 			ID:              orderID,
 			PositionID:      posID,
-			ExchangeOrderID: fmt.Sprint(ord.OrderId),
+			ExchangeOrderID: ord.OrderId,
 			Type:            helpers.OrderTypeFromMEXC(ord.OrderType),
 			Status:          "FILLED",
 			Side:            side,

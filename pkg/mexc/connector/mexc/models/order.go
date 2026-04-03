@@ -1,7 +1,7 @@
 package models
 
 type Order struct {
-	OrderId        int64   `json:"orderId"`
+	OrderId        string  `json:"orderId"`
 	Symbol         string  `json:"symbol"`
 	PositionId     int64   `json:"positionId"`
 	Price          float64 `json:"price"`

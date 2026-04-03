@@ -23,7 +23,7 @@ func FetchAllTransferRecords(client *resty.Client) ([]models.TransferRecord, err
 			"state":     "SUCCESS",
 		}
 
-		data, err := mexc.DoGet[[]models.TransferRecord](client, transferRecordPath, params)
+		data, err := mexc.DoGetPaginated[models.TransferRecord](client, transferRecordPath, params)
 		if err != nil {
 			if page > 1 && isHTTP5xx(err) {
 				break

@@ -115,6 +115,24 @@ type PageResponse[T any] struct {
 	Data    []T  `json:"data"`
 }
 
+// PaginatedData is the wrapper for endpoints that return {resultList, totalCount, ...}.
+type PaginatedData[T any] struct {
+	ResultList  []T `json:"resultList"`
+	TotalCount  int `json:"totalCount"`
+	TotalPage   int `json:"totalPage"`
+	CurrentPage int `json:"currentPage"`
+	PageSize    int `json:"pageSize"`
+}
+
+// DoGetPaginated is like DoGet but for endpoints that wrap data in {resultList: [...]}.
+func DoGetPaginated[T any](client *resty.Client, path string, params map[string]string) ([]T, error) {
+	page, err := DoGet[PaginatedData[T]](client, path, params)
+	if err != nil {
+		return nil, err
+	}
+	return page.ResultList, nil
+}
+
 type HTTPError struct {
 	StatusCode int
 	Status     string
