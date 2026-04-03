@@ -69,7 +69,7 @@ func ReconstructClosedPositions(client *resty.Client) ([]domain.Position, error)
 		replyCh := make(chan helpers.CandleResponse, 1)
 		candleRequests <- helpers.CandleRequest{
 			Symbol:  cp.Symbol,
-			Bar:     "5m",
+			Bar:     "1m",
 			StartMs: cp.CreateTime,
 			EndMs:   cp.UpdateTime,
 			ReplyCh: replyCh,
