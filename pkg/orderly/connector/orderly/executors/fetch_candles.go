@@ -11,10 +11,11 @@ import (
 
 const candlesMaxLimit = 1000
 
-var supportedIntervals = map[string]bool{
-	"1m": true, "5m": true, "15m": true, "30m": true,
-	"1h": true, "4h": true, "12h": true,
-	"1d": true, "1w": true, "1mon": true, "1y": true,
+// supportedIntervals maps standard (Hyperliquid) interval format to Orderly API format.
+var supportedIntervals = map[string]string{
+	"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
+	"1h": "1h", "4h": "4h", "12h": "12h",
+	"1d": "1d", "1w": "1w", "1M": "1mon", "1y": "1y",
 }
 
 func FetchCandles(
@@ -23,8 +24,9 @@ func FetchCandles(
 	interval string,
 	startTime, endTime int64,
 ) ([]models.OrderlyCandle, error) {
-	if !supportedIntervals[interval] {
-		return nil, fmt.Errorf("orderly: unsupported candle interval %q, supported: 1m, 5m, 15m, 30m, 1h, 4h, 12h, 1d, 1w, 1mon, 1y", interval)
+	orderlyInterval, ok := supportedIntervals[interval]
+	if !ok {
+		return nil, fmt.Errorf("orderly: unsupported candle interval %q, supported: 1m, 5m, 15m, 30m, 1h, 4h, 12h, 1d, 1w, 1M, 1y", interval)
 	}
 
 	var all []models.OrderlyCandle
@@ -35,13 +37,13 @@ func FetchCandles(
 	for {
 		params := map[string]string{
 			"symbol": symbol,
-			"type":   interval,
+			"type":   orderlyInterval,
 			"limit":  strconv.Itoa(candlesMaxLimit),
 		}
 
 		var candles models.OrderlyResponse[models.CandleRows]
 		if err := client.Get("/v1/kline", params, &candles); err != nil {
-			return nil, fmt.Errorf("orderly fetch candles %s %s: %w", symbol, interval, err)
+			return nil, fmt.Errorf("orderly fetch candles %s %s: %w", symbol, orderlyInterval, err)
 		}
 
 		if !candles.Success {
