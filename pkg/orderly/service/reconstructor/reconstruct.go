@@ -89,6 +89,13 @@ func ReconstructTrades(
 ) {
 	matches, _ := helpers.MatchFillGroups(trades, orderMap)
 
+	type pendingCandle struct {
+		env     envelope.TradeEnvelope
+		replyCh chan helpers.CandleResponse
+	}
+
+	pending := make([]pendingCandle, 0, len(matches))
+
 	for _, match := range matches {
 		fills := match.Fills
 		if len(fills) == 0 {
@@ -135,12 +142,14 @@ func ReconstructTrades(
 			EndMs:    last.ExecutedTimestamp,
 			ReplyCh:  replyCh,
 		}
+		pending = append(pending, pendingCandle{env: env, replyCh: replyCh})
+	}
 
-		resp := <-replyCh
+	for _, p := range pending {
+		resp := <-p.replyCh
 		if resp.Err == nil {
-			env.High, env.Low = helpers.GetHighLow(resp.Candles)
+			p.env.High, p.env.Low = helpers.GetHighLow(resp.Candles)
 		}
-
-		out <- env
+		out <- p.env
 	}
 }

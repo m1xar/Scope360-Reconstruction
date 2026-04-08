@@ -1,9 +1,5 @@
 package models
 
-type CandleRows struct {
-	Rows []OrderlyCandle `json:"rows"`
-}
-
 type OrderlyCandle struct {
 	Open           float64 `json:"open"`
 	Close          float64 `json:"close"`
