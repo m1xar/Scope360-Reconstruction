@@ -27,8 +27,7 @@ type Credentials struct {
 	Secret string
 }
 
-func NewClient(creds Credentials) *resty.Client {
-	client := newBaseClient()
+func AttachAuth(client *resty.Client, creds Credentials) {
 	client.SetPreRequestHook(func(_ *resty.Client, req *http.Request) error {
 		ts := fmt.Sprintf("%d", time.Now().UnixMilli())
 
@@ -46,6 +45,11 @@ func NewClient(creds Credentials) *resty.Client {
 
 		return nil
 	})
+}
+
+func NewClient(creds Credentials) *resty.Client {
+	client := newBaseClient()
+	AttachAuth(client, creds)
 	return client
 }
 

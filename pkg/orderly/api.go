@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/go-resty/resty/v2"
 	connector "github.com/m1xar/scope360-reconstruction/pkg/orderly/connector/orderly"
 	"github.com/m1xar/scope360-reconstruction/pkg/orderly/connector/orderly/executors"
 	"github.com/m1xar/scope360-reconstruction/pkg/orderly/connector/orderly/models"
@@ -15,15 +16,22 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 )
 
-func GetBuiltPositions(client *connector.Client, days int) ([]domain.Position, error) {
-	positions, err := reconstructor.ReconstructClosedPositions(client, "")
+func newClient(httpClient *resty.Client, cfg connector.Config) *connector.Client {
+	cfg.HTTPClient = httpClient
+	return connector.NewClient(cfg)
+}
+
+func GetBuiltPositions(client *resty.Client, cfg connector.Config, days int) ([]domain.Position, error) {
+	c := newClient(client, cfg)
+
+	positions, err := reconstructor.ReconstructClosedPositions(c, "")
 	if err != nil {
 		return nil, err
 	}
-	if err := builders.EnrichPositionsWithCurrentRisk(client, &positions); err != nil {
+	if err := builders.EnrichPositionsWithCurrentRisk(c, &positions); err != nil {
 		return nil, err
 	}
-	assetHistory, err := executors.FetchAssetHistory(client)
+	assetHistory, err := executors.FetchAssetHistory(c)
 	if err != nil {
 		return nil, err
 	}
@@ -37,12 +45,13 @@ func GetBuiltPositions(client *connector.Client, days int) ([]domain.Position, e
 }
 
 func GetClosedPositionByExactMatch(
-	client *connector.Client,
+	client *resty.Client,
+	cfg connector.Config,
 	pair string,
 	openedAt time.Time,
 	side string,
 ) (*domain.Position, error) {
-	positions, err := GetBuiltPositions(client, 0)
+	positions, err := GetBuiltPositions(client, cfg, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -58,13 +67,15 @@ func GetClosedPositionByExactMatch(
 	return nil, nil
 }
 
-func GetBalanceSnapshots(client *connector.Client, days int) ([]domain.UserBalanceSnapshot, error) {
-	positions, err := reconstructor.ReconstructClosedPositions(client, "")
+func GetBalanceSnapshots(client *resty.Client, cfg connector.Config, days int) ([]domain.UserBalanceSnapshot, error) {
+	c := newClient(client, cfg)
+
+	positions, err := reconstructor.ReconstructClosedPositions(c, "")
 	if err != nil {
 		return nil, err
 	}
 
-	assetHistory, err := executors.FetchAssetHistory(client)
+	assetHistory, err := executors.FetchAssetHistory(c)
 	if err != nil {
 		return nil, err
 	}
@@ -80,8 +91,8 @@ func GetBalanceSnapshots(client *connector.Client, days int) ([]domain.UserBalan
 	return snapshots, nil
 }
 
-func GetCurrentBalance(client *connector.Client) (*float64, error) {
-	snapshots, err := GetBalanceSnapshots(client, 0)
+func GetCurrentBalance(client *resty.Client, cfg connector.Config) (*float64, error) {
+	snapshots, err := GetBalanceSnapshots(client, cfg, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -93,13 +104,15 @@ func GetCurrentBalance(client *connector.Client) (*float64, error) {
 	return &balance, nil
 }
 
-func GetFundings(client *connector.Client, days int) ([]domain.UserFunding, error) {
+func GetFundings(client *resty.Client, cfg connector.Config, days int) ([]domain.UserFunding, error) {
+	c := newClient(client, cfg)
+
 	var startTime int64
 	if days > 0 {
 		startTime = time.Now().AddDate(0, 0, -days).UnixMilli()
 	}
 
-	rawFundings, err := executors.FetchAllFunding(client, "", startTime, 0)
+	rawFundings, err := executors.FetchAllFunding(c, "", startTime, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -116,12 +129,15 @@ func GetFundings(client *connector.Client, days int) ([]domain.UserFunding, erro
 }
 
 func GetCandles(
-	client *connector.Client,
+	client *resty.Client,
+	cfg connector.Config,
 	coin string,
 	interval string,
 	startTime time.Time,
 	endTime time.Time,
 ) ([]models.OrderlyCandle, error) {
+	c := newClient(client, cfg)
+
 	if endTime.Before(startTime) {
 		return nil, errors.New("endTime must be >= startTime")
 	}
@@ -130,7 +146,7 @@ func GetCandles(
 	startMs := startTime.UnixMilli()
 	endMs := endTime.UnixMilli()
 
-	candles, err := executors.FetchCandles(client, symbol, interval, startMs, endMs)
+	candles, err := executors.FetchCandles(c, symbol, interval, startMs, endMs)
 	if err != nil {
 		return nil, err
 	}
@@ -138,8 +154,10 @@ func GetCandles(
 	return candles, nil
 }
 
-func GetOpenPositions(client *connector.Client) ([]domain.OpenPosition, error) {
-	positions, err := executors.FetchOpenPositions(client)
+func GetOpenPositions(client *resty.Client, cfg connector.Config) ([]domain.OpenPosition, error) {
+	c := newClient(client, cfg)
+
+	positions, err := executors.FetchOpenPositions(c)
 	if err != nil {
 		return nil, err
 	}

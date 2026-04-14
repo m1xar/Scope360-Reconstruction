@@ -15,7 +15,9 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/service/reconstructor/helpers"
 )
 
-func GetAuthStatus(client *resty.Client) string {
+func GetAuthStatus(client *resty.Client, creds mexcclient.Credentials) string {
+	mexcclient.AttachAuth(client, creds)
+
 	_, err := executors.FetchUSDTAsset(client)
 	if err != nil {
 		return "error"
@@ -26,8 +28,11 @@ func GetAuthStatus(client *resty.Client) string {
 
 func GetBuiltPositions(
 	client *resty.Client,
+	creds mexcclient.Credentials,
 	days int,
 ) ([]domain.Position, error) {
+	mexcclient.AttachAuth(client, creds)
+
 	positions, err := reconstructor.ReconstructClosedPositions(client)
 	if err != nil {
 		return nil, err
@@ -58,11 +63,12 @@ func GetBuiltPositions(
 
 func GetClosedPositionByExactMatch(
 	client *resty.Client,
+	creds mexcclient.Credentials,
 	pair string,
 	openedAt time.Time,
 	side string,
 ) (*domain.Position, error) {
-	positions, err := GetBuiltPositions(client, 0)
+	positions, err := GetBuiltPositions(client, creds, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +84,10 @@ func GetClosedPositionByExactMatch(
 
 func GetOpenPositions(
 	client *resty.Client,
+	creds mexcclient.Credentials,
 ) ([]domain.OpenPosition, error) {
+	mexcclient.AttachAuth(client, creds)
+
 	raw, err := executors.FetchOpenPositions(client)
 	if err != nil {
 		return nil, err
@@ -96,8 +105,11 @@ func GetOpenPositions(
 
 func GetBalanceSnapshots(
 	client *resty.Client,
+	creds mexcclient.Credentials,
 	days int,
 ) ([]domain.UserBalanceSnapshot, error) {
+	mexcclient.AttachAuth(client, creds)
+
 	positions, err := reconstructor.ReconstructClosedPositions(client)
 	if err != nil {
 		return nil, err
@@ -135,7 +147,10 @@ func GetBalanceSnapshots(
 
 func GetCurrentBalance(
 	client *resty.Client,
+	creds mexcclient.Credentials,
 ) (*float64, error) {
+	mexcclient.AttachAuth(client, creds)
+
 	asset, err := executors.FetchUSDTAsset(client)
 	if err != nil {
 		return nil, err
@@ -147,8 +162,11 @@ func GetCurrentBalance(
 
 func GetFundings(
 	client *resty.Client,
+	creds mexcclient.Credentials,
 	days int,
 ) ([]domain.UserFunding, error) {
+	mexcclient.AttachAuth(client, creds)
+
 	records, err := executors.FetchAllFundingRecords(client)
 	if err != nil {
 		return nil, err

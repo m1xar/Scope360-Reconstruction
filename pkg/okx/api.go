@@ -29,9 +29,12 @@ func GetAuthStatus(apiKey, secret, passphrase string) (string, okxclient.Region)
 
 func GetBuiltPositions(
 	client *resty.Client,
+	creds okxclient.Credentials,
 	baseURL string,
 	days int,
 ) ([]domain.Position, error) {
+	okxclient.AttachAuth(client, creds)
+
 	closedPositions, err := executors.FetchAllClosedPositions(client, baseURL)
 	if err != nil {
 		return nil, err
@@ -132,12 +135,13 @@ func GetBuiltPositions(
 
 func GetClosedPositionByExactMatch(
 	client *resty.Client,
+	creds okxclient.Credentials,
 	baseURL string,
 	pair string,
 	openedAt time.Time,
 	side string,
 ) (*domain.Position, error) {
-	positions, err := GetBuiltPositions(client, baseURL, 0)
+	positions, err := GetBuiltPositions(client, creds, baseURL, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -153,8 +157,11 @@ func GetClosedPositionByExactMatch(
 
 func GetOpenPositions(
 	client *resty.Client,
+	creds okxclient.Credentials,
 	baseURL string,
 ) ([]domain.OpenPosition, error) {
+	okxclient.AttachAuth(client, creds)
+
 	raw, err := executors.FetchOpenPositions(client, baseURL)
 	if err != nil {
 		return nil, err
@@ -169,9 +176,12 @@ func GetOpenPositions(
 
 func GetBalanceSnapshots(
 	client *resty.Client,
+	creds okxclient.Credentials,
 	baseURL string,
 	days int,
 ) ([]domain.UserBalanceSnapshot, error) {
+	okxclient.AttachAuth(client, creds)
+
 	balance, err := executors.FetchBalance(client, baseURL)
 	if err != nil {
 		return nil, err
@@ -204,8 +214,11 @@ func GetBalanceSnapshots(
 
 func GetCurrentBalance(
 	client *resty.Client,
+	creds okxclient.Credentials,
 	baseURL string,
 ) (*float64, error) {
+	okxclient.AttachAuth(client, creds)
+
 	balance, err := executors.FetchBalance(client, baseURL)
 	if err != nil {
 		return nil, err
@@ -217,9 +230,12 @@ func GetCurrentBalance(
 
 func GetFundings(
 	client *resty.Client,
+	creds okxclient.Credentials,
 	baseURL string,
 	days int,
 ) ([]domain.UserFunding, error) {
+	okxclient.AttachAuth(client, creds)
+
 	startMs := int64(0)
 	cutoff := helpers.CutoffFromDays(days)
 	if cutoff != nil {
