@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/go-resty/resty/v2"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 	mexcclient "github.com/m1xar/scope360-reconstruction/pkg/mexc/connector/mexc"
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/connector/mexc/executors"
@@ -14,11 +15,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/service/reconstructor/helpers"
 )
 
-func GetAuthStatus(apiKey, secret string) string {
-	client := mexcclient.NewClient(mexcclient.Credentials{
-		APIKey: apiKey, Secret: secret,
-	})
-
+func GetAuthStatus(client *resty.Client) string {
 	_, err := executors.FetchUSDTAsset(client)
 	if err != nil {
 		return "error"
@@ -28,13 +25,9 @@ func GetAuthStatus(apiKey, secret string) string {
 }
 
 func GetBuiltPositions(
-	apiKey, secret string,
+	client *resty.Client,
 	days int,
 ) ([]domain.Position, error) {
-	client := mexcclient.NewClient(mexcclient.Credentials{
-		APIKey: apiKey, Secret: secret,
-	})
-
 	positions, err := reconstructor.ReconstructClosedPositions(client)
 	if err != nil {
 		return nil, err
@@ -64,12 +57,12 @@ func GetBuiltPositions(
 }
 
 func GetClosedPositionByExactMatch(
-	apiKey, secret string,
+	client *resty.Client,
 	pair string,
 	openedAt time.Time,
 	side string,
 ) (*domain.Position, error) {
-	positions, err := GetBuiltPositions(apiKey, secret, 0)
+	positions, err := GetBuiltPositions(client, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -84,12 +77,8 @@ func GetClosedPositionByExactMatch(
 }
 
 func GetOpenPositions(
-	apiKey, secret string,
+	client *resty.Client,
 ) ([]domain.OpenPosition, error) {
-	client := mexcclient.NewClient(mexcclient.Credentials{
-		APIKey: apiKey, Secret: secret,
-	})
-
 	raw, err := executors.FetchOpenPositions(client)
 	if err != nil {
 		return nil, err
@@ -106,13 +95,9 @@ func GetOpenPositions(
 }
 
 func GetBalanceSnapshots(
-	apiKey, secret string,
+	client *resty.Client,
 	days int,
 ) ([]domain.UserBalanceSnapshot, error) {
-	client := mexcclient.NewClient(mexcclient.Credentials{
-		APIKey: apiKey, Secret: secret,
-	})
-
 	positions, err := reconstructor.ReconstructClosedPositions(client)
 	if err != nil {
 		return nil, err
@@ -149,12 +134,8 @@ func GetBalanceSnapshots(
 }
 
 func GetCurrentBalance(
-	apiKey, secret string,
+	client *resty.Client,
 ) (*float64, error) {
-	client := mexcclient.NewClient(mexcclient.Credentials{
-		APIKey: apiKey, Secret: secret,
-	})
-
 	asset, err := executors.FetchUSDTAsset(client)
 	if err != nil {
 		return nil, err
@@ -165,13 +146,9 @@ func GetCurrentBalance(
 }
 
 func GetFundings(
-	apiKey, secret string,
+	client *resty.Client,
 	days int,
 ) ([]domain.UserFunding, error) {
-	client := mexcclient.NewClient(mexcclient.Credentials{
-		APIKey: apiKey, Secret: secret,
-	})
-
 	records, err := executors.FetchAllFundingRecords(client)
 	if err != nil {
 		return nil, err
@@ -194,12 +171,15 @@ func GetFundings(
 }
 
 func GetCandles(
+	client *resty.Client,
 	symbol string,
 	interval string,
 	startTime time.Time,
 	endTime time.Time,
 ) ([]models.Candle, error) {
-	client := mexcclient.NewPublicClient()
+	if client == nil {
+		client = mexcclient.NewPublicClient()
+	}
 
 	if endTime.Before(startTime) {
 		return nil, fmt.Errorf("endTime must be >= startTime")

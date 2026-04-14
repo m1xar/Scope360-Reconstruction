@@ -15,9 +15,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 )
 
-func GetBuiltPositions(cfg connector.Config, days int) ([]domain.Position, error) {
-	client := connector.NewClient(cfg)
-
+func GetBuiltPositions(client *connector.Client, days int) ([]domain.Position, error) {
 	positions, err := reconstructor.ReconstructClosedPositions(client, "")
 	if err != nil {
 		return nil, err
@@ -39,12 +37,12 @@ func GetBuiltPositions(cfg connector.Config, days int) ([]domain.Position, error
 }
 
 func GetClosedPositionByExactMatch(
-	cfg connector.Config,
+	client *connector.Client,
 	pair string,
 	openedAt time.Time,
 	side string,
 ) (*domain.Position, error) {
-	positions, err := GetBuiltPositions(cfg, 0)
+	positions, err := GetBuiltPositions(client, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -60,9 +58,7 @@ func GetClosedPositionByExactMatch(
 	return nil, nil
 }
 
-func GetBalanceSnapshots(cfg connector.Config, days int) ([]domain.UserBalanceSnapshot, error) {
-	client := connector.NewClient(cfg)
-
+func GetBalanceSnapshots(client *connector.Client, days int) ([]domain.UserBalanceSnapshot, error) {
 	positions, err := reconstructor.ReconstructClosedPositions(client, "")
 	if err != nil {
 		return nil, err
@@ -84,8 +80,8 @@ func GetBalanceSnapshots(cfg connector.Config, days int) ([]domain.UserBalanceSn
 	return snapshots, nil
 }
 
-func GetCurrentBalance(cfg connector.Config) (*float64, error) {
-	snapshots, err := GetBalanceSnapshots(cfg, 0)
+func GetCurrentBalance(client *connector.Client) (*float64, error) {
+	snapshots, err := GetBalanceSnapshots(client, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -97,9 +93,7 @@ func GetCurrentBalance(cfg connector.Config) (*float64, error) {
 	return &balance, nil
 }
 
-func GetFundings(cfg connector.Config, days int) ([]domain.UserFunding, error) {
-	client := connector.NewClient(cfg)
-
+func GetFundings(client *connector.Client, days int) ([]domain.UserFunding, error) {
 	var startTime int64
 	if days > 0 {
 		startTime = time.Now().AddDate(0, 0, -days).UnixMilli()
@@ -122,14 +116,12 @@ func GetFundings(cfg connector.Config, days int) ([]domain.UserFunding, error) {
 }
 
 func GetCandles(
-	cfg connector.Config,
+	client *connector.Client,
 	coin string,
 	interval string,
 	startTime time.Time,
 	endTime time.Time,
 ) ([]models.OrderlyCandle, error) {
-	client := connector.NewClient(cfg)
-
 	if endTime.Before(startTime) {
 		return nil, errors.New("endTime must be >= startTime")
 	}
@@ -146,9 +138,7 @@ func GetCandles(
 	return candles, nil
 }
 
-func GetOpenPositions(cfg connector.Config) ([]domain.OpenPosition, error) {
-	client := connector.NewClient(cfg)
-
+func GetOpenPositions(client *connector.Client) ([]domain.OpenPosition, error) {
 	positions, err := executors.FetchOpenPositions(client)
 	if err != nil {
 		return nil, err

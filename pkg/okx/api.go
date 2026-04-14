@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/go-resty/resty/v2"
 	"github.com/google/uuid"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 	okxclient "github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx"
@@ -27,15 +28,10 @@ func GetAuthStatus(apiKey, secret, passphrase string) (string, okxclient.Region)
 }
 
 func GetBuiltPositions(
-	region okxclient.Region,
-	apiKey, secret, passphrase string,
+	client *resty.Client,
+	baseURL string,
 	days int,
 ) ([]domain.Position, error) {
-	baseURL := okxclient.BaseURL(region)
-	client := okxclient.NewClient(okxclient.Credentials{
-		APIKey: apiKey, Secret: secret, Passphrase: passphrase,
-	})
-
 	closedPositions, err := executors.FetchAllClosedPositions(client, baseURL)
 	if err != nil {
 		return nil, err
@@ -135,13 +131,13 @@ func GetBuiltPositions(
 }
 
 func GetClosedPositionByExactMatch(
-	region okxclient.Region,
-	apiKey, secret, passphrase string,
+	client *resty.Client,
+	baseURL string,
 	pair string,
 	openedAt time.Time,
 	side string,
 ) (*domain.Position, error) {
-	positions, err := GetBuiltPositions(region, apiKey, secret, passphrase, 0)
+	positions, err := GetBuiltPositions(client, baseURL, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -156,14 +152,9 @@ func GetClosedPositionByExactMatch(
 }
 
 func GetOpenPositions(
-	region okxclient.Region,
-	apiKey, secret, passphrase string,
+	client *resty.Client,
+	baseURL string,
 ) ([]domain.OpenPosition, error) {
-	baseURL := okxclient.BaseURL(region)
-	client := okxclient.NewClient(okxclient.Credentials{
-		APIKey: apiKey, Secret: secret, Passphrase: passphrase,
-	})
-
 	raw, err := executors.FetchOpenPositions(client, baseURL)
 	if err != nil {
 		return nil, err
@@ -177,15 +168,10 @@ func GetOpenPositions(
 }
 
 func GetBalanceSnapshots(
-	region okxclient.Region,
-	apiKey, secret, passphrase string,
+	client *resty.Client,
+	baseURL string,
 	days int,
 ) ([]domain.UserBalanceSnapshot, error) {
-	baseURL := okxclient.BaseURL(region)
-	client := okxclient.NewClient(okxclient.Credentials{
-		APIKey: apiKey, Secret: secret, Passphrase: passphrase,
-	})
-
 	balance, err := executors.FetchBalance(client, baseURL)
 	if err != nil {
 		return nil, err
@@ -217,14 +203,9 @@ func GetBalanceSnapshots(
 }
 
 func GetCurrentBalance(
-	region okxclient.Region,
-	apiKey, secret, passphrase string,
+	client *resty.Client,
+	baseURL string,
 ) (*float64, error) {
-	baseURL := okxclient.BaseURL(region)
-	client := okxclient.NewClient(okxclient.Credentials{
-		APIKey: apiKey, Secret: secret, Passphrase: passphrase,
-	})
-
 	balance, err := executors.FetchBalance(client, baseURL)
 	if err != nil {
 		return nil, err
@@ -235,15 +216,10 @@ func GetCurrentBalance(
 }
 
 func GetFundings(
-	region okxclient.Region,
-	apiKey, secret, passphrase string,
+	client *resty.Client,
+	baseURL string,
 	days int,
 ) ([]domain.UserFunding, error) {
-	baseURL := okxclient.BaseURL(region)
-	client := okxclient.NewClient(okxclient.Credentials{
-		APIKey: apiKey, Secret: secret, Passphrase: passphrase,
-	})
-
 	startMs := int64(0)
 	cutoff := helpers.CutoffFromDays(days)
 	if cutoff != nil {
@@ -275,13 +251,16 @@ func GetFundings(
 }
 
 func GetCandles(
+	client *resty.Client,
 	baseURL string,
 	instId string,
 	bar string,
 	startTime time.Time,
 	endTime time.Time,
 ) ([]models.Candle, error) {
-	client := okxclient.NewPublicClient()
+	if client == nil {
+		client = okxclient.NewPublicClient()
+	}
 
 	if endTime.Before(startTime) {
 		return nil, fmt.Errorf("endTime must be >= startTime")
