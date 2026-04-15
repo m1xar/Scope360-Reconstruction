@@ -160,7 +160,7 @@ func BuildOrders(orders []models.Order, posID uuid.UUID) []domain.Order {
 			Type:            helpers.OrderTypeFromMEXC(ord.OrderType),
 			Status:          "FILLED",
 			Side:            side,
-			Amount:          helpers.Round8(ord.Vol),
+			Amount:          helpers.Round8(ord.DealVol),
 			AmountFilled:    fillSz,
 			AveragePrice:    avgPx,
 			StopPrice:       helpers.Round8(ord.StopLossPrice),
