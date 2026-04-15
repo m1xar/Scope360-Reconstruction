@@ -18,20 +18,11 @@ func MatchOrdersToPosition(hp models.HistoryPosition, ordersBySymbol map[string]
 		return nil
 	}
 
-	isLong := hp.PositionType == 1
-
 	matched := make([]models.Order, 0)
 	for _, ord := range symOrders {
-		if ord.CreateTime < hp.CreateTime || ord.UpdateTime > hp.UpdateTime {
-			continue
+		if ord.PositionId == hp.PositionId {
+			matched = append(matched, ord)
 		}
-
-		orderForLong := IsOrderForLong(ord.Side)
-		if isLong != orderForLong {
-			continue
-		}
-
-		matched = append(matched, ord)
 	}
 	return matched
 }
