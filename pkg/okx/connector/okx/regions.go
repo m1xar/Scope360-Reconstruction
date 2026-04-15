@@ -28,7 +28,8 @@ func BaseURL(r Region) string {
 var allRegions = []Region{RegionGlobal, RegionEEA, RegionUS}
 
 func CheckAccount(apiKey, secret, passphrase string) (Region, error) {
-	client := NewClient(Credentials{
+	client := NewBaseClient()
+	AttachAuth(client, Credentials{
 		APIKey:     apiKey,
 		Secret:     secret,
 		Passphrase: passphrase,

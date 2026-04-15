@@ -272,7 +272,7 @@ func GetCandles(
 	endTime time.Time,
 ) ([]models.Candle, error) {
 	if client == nil {
-		client = okxclient.NewPublicClient()
+		client = okxclient.NewBaseClient()
 	}
 
 	if endTime.Before(startTime) {

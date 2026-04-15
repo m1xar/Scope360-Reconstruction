@@ -43,17 +43,7 @@ func AttachAuth(client *resty.Client, creds Credentials) {
 	})
 }
 
-func NewClient(creds Credentials) *resty.Client {
-	client := newBaseClient()
-	AttachAuth(client, creds)
-	return client
-}
-
-func NewPublicClient() *resty.Client {
-	return newBaseClient()
-}
-
-func newBaseClient() *resty.Client {
+func NewBaseClient() *resty.Client {
 	client := resty.New().
 		SetTimeout(defaultTimeout).
 		SetRetryCount(defaultRetryCount).
