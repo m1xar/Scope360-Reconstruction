@@ -39,7 +39,9 @@ func FetchAllOrders(client *resty.Client, baseURL, instType string, startMs int6
 				params["after"] = after
 			}
 
-			page, err := okx.DoGet[[]models.Order](client, baseURL, ordersArchivePath, params)
+			page, err := doWithRateLimit(func() ([]models.Order, error) {
+				return okx.DoGet[[]models.Order](client, baseURL, ordersArchivePath, params)
+			})
 			if err != nil {
 				if after != "" && isHTTP5xx(err) {
 					break

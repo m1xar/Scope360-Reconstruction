@@ -16,7 +16,7 @@ const billsPageLimit = 100
 
 const billsWindowSize = 90 * 24 * time.Hour
 
-func FetchAllBillsByInstType(client *resty.Client, baseURL, instType string, startMs int64) ([]models.Bill, error) {
+func FetchAllBillsByInstType(client *resty.Client, baseURL, instType string, startMs int64, billType string) ([]models.Bill, error) {
 	var result []models.Bill
 	now := time.Now().UnixMilli()
 
@@ -39,11 +39,16 @@ func FetchAllBillsByInstType(client *resty.Client, baseURL, instType string, sta
 				"begin":    fmt.Sprint(windowBegin),
 				"end":      fmt.Sprint(windowEnd),
 			}
+			if billType != "" {
+				params["type"] = billType
+			}
 			if after != "" {
 				params["after"] = after
 			}
 
-			page, err := okx.DoGet[[]models.Bill](client, baseURL, billsArchivePath, params)
+			page, err := doWithRateLimit(func() ([]models.Bill, error) {
+				return okx.DoGet[[]models.Bill](client, baseURL, billsArchivePath, params)
+			})
 			if err != nil {
 				if after != "" && isHTTP5xx(err) {
 					break
@@ -66,7 +71,7 @@ func FetchAllBillsByInstType(client *resty.Client, baseURL, instType string, sta
 	return result, nil
 }
 
-func FetchAllSwapAndFuturesBills(client *resty.Client, baseURL string, startMs int64) ([]models.Bill, error) {
+func FetchAllSwapAndFuturesBills(client *resty.Client, baseURL string, startMs int64, billType string) ([]models.Bill, error) {
 	var swapBills, futuresBills []models.Bill
 	var swapErr, futuresErr error
 	var wg sync.WaitGroup
@@ -74,11 +79,11 @@ func FetchAllSwapAndFuturesBills(client *resty.Client, baseURL string, startMs i
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		swapBills, swapErr = FetchAllBillsByInstType(client, baseURL, "SWAP", startMs)
+		swapBills, swapErr = FetchAllBillsByInstType(client, baseURL, "SWAP", startMs, billType)
 	}()
 	go func() {
 		defer wg.Done()
-		futuresBills, futuresErr = FetchAllBillsByInstType(client, baseURL, "FUTURES", startMs)
+		futuresBills, futuresErr = FetchAllBillsByInstType(client, baseURL, "FUTURES", startMs, billType)
 	}()
 	wg.Wait()
 

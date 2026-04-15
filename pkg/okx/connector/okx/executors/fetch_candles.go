@@ -40,7 +40,9 @@ func FetchCandles(client *resty.Client, baseURL, instId, bar string, startMs, en
 			params["before"] = fmt.Sprint(startMs)
 		}
 
-		page, err := okx.DoGet[[]models.Candle](client, baseURL, historyCandlesPath, params)
+		page, err := doWithRateLimit(func() ([]models.Candle, error) {
+			return okx.DoGet[[]models.Candle](client, baseURL, historyCandlesPath, params)
+		})
 		if err != nil {
 			if len(result) > 0 && isHTTP5xx(err) {
 				break

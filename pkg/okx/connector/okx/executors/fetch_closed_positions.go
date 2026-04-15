@@ -31,7 +31,9 @@ func FetchAllClosedPositionsByInstType(client *resty.Client, baseURL, instType s
 			params["after"] = after
 		}
 
-		page, err := okx.DoGet[[]models.ClosedPosition](client, baseURL, positionsHistoryPath, params)
+		page, err := doWithRateLimit(func() ([]models.ClosedPosition, error) {
+			return okx.DoGet[[]models.ClosedPosition](client, baseURL, positionsHistoryPath, params)
+		})
 		if err != nil {
 			if after != "" && isHTTP5xx(err) {
 				break

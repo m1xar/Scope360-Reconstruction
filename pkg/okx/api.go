@@ -123,7 +123,7 @@ func GetBuiltPositions(
 	balance, err := executors.FetchBalance(client, baseURL)
 	if err == nil {
 		currentBal := helpers.MustFloat(balance.TotalEq)
-		bills, billsErr := executors.FetchAllSwapAndFuturesBills(client, baseURL, oldestMs)
+		bills, billsErr := executors.FetchAllSwapAndFuturesBills(client, baseURL, oldestMs, "")
 		if billsErr == nil && len(bills) > 0 {
 			snapshots := builders.BuildBalanceSnapshotsFromBills(currentBal, bills)
 			helpers.AttachBalanceInit(&positions, snapshots)
@@ -194,7 +194,7 @@ func GetBalanceSnapshots(
 		startMs = cutoff.UnixMilli()
 	}
 
-	bills, err := executors.FetchAllSwapAndFuturesBills(client, baseURL, startMs)
+	bills, err := executors.FetchAllSwapAndFuturesBills(client, baseURL, startMs, "")
 	if err != nil {
 		return nil, err
 	}
@@ -242,16 +242,13 @@ func GetFundings(
 		startMs = cutoff.UnixMilli()
 	}
 
-	bills, err := executors.FetchAllSwapAndFuturesBills(client, baseURL, startMs)
+	bills, err := executors.FetchAllSwapAndFuturesBills(client, baseURL, startMs, "8")
 	if err != nil {
 		return nil, err
 	}
 
 	fundings := make([]domain.UserFunding, 0, len(bills))
 	for _, b := range bills {
-		if b.Type != "8" {
-			continue
-		}
 		amount := helpers.MustFloat(b.BalChg)
 		if amount == 0 {
 			continue
