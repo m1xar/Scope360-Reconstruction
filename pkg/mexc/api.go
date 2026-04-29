@@ -49,14 +49,7 @@ func GetBuiltPositions(
 		positions = trimmed
 	}
 
-	asset, err := executors.FetchUSDTAsset(client)
-	if err == nil {
-		transfers, trErr := executors.FetchAllTransferRecords(client)
-		if trErr == nil && len(transfers) > 0 {
-			snapshots := builders.BuildSyntheticBalanceSnapshots(asset.Equity, transfers, positions)
-			builders.AttachBalanceInit(&positions, snapshots)
-		}
-	}
+	builders.AttachNotionalBalanceInit(&positions)
 
 	return positions, nil
 }
@@ -115,17 +108,7 @@ func GetBalanceSnapshots(
 		return nil, err
 	}
 
-	asset, err := executors.FetchUSDTAsset(client)
-	if err != nil {
-		return nil, err
-	}
-
-	transfers, err := executors.FetchAllTransferRecords(client)
-	if err != nil {
-		return nil, err
-	}
-
-	snapshots := builders.BuildSyntheticBalanceSnapshots(asset.Equity, transfers, positions)
+	snapshots := builders.BuildZeroBalanceSnapshots(positions)
 
 	cutoff := helpers.CutoffFromDays(days)
 	if cutoff != nil {
