@@ -13,7 +13,10 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/kraken/service/reconstructor/helpers"
 )
 
-const sizeEpsilon = 1e-9
+const (
+	sizeEpsilon        = 1e-9
+	eventTimeTolerance = 2 * time.Second
+)
 
 type fillPart struct {
 	Fill models.Fill
@@ -246,13 +249,24 @@ func enrichWithPositionEvents(
 			}
 
 			eventTime := eventTime(upd, ev)
-			if _, ok := fillIDs[upd.ExecutionUID]; !ok && (eventTime.Before(ep.OpenAt) || eventTime.After(ep.CloseAt)) {
+			partIndexes := matchEventParts(ep.Parts, upd, eventTime)
+			if _, ok := fillIDs[upd.ExecutionUID]; !ok && len(partIndexes) == 0 && (eventTime.Before(ep.OpenAt) || eventTime.After(ep.CloseAt)) {
 				continue
 			}
 
-			fee += math.Abs(upd.Fee.Float64())
-			pnl += upd.RealizedPnL.Float64()
-			funding += upd.RealizedFunding.Float64()
+			eventFee := math.Abs(upd.Fee.Float64())
+			eventPnl := upd.RealizedPnL.Float64()
+			eventFunding := upd.RealizedFunding.Float64()
+			if len(partIndexes) > 0 {
+				allocatedFee, allocatedPnl, allocatedFunding := applyEventStatsToOrders(&positions[i], ep, partIndexes, eventFee, eventPnl, eventFunding)
+				fee += allocatedFee
+				pnl += allocatedPnl
+				funding += allocatedFunding
+			} else {
+				fee += eventFee
+				pnl += eventPnl
+				funding += eventFunding
+			}
 			matched = true
 		}
 
@@ -270,7 +284,118 @@ func enrichWithPositionEvents(
 		positions[i].Funding = helpers.Round8(funding)
 		positions[i].NetPnl = helpers.Round8(net)
 		positions[i].Status = &status
+		reconcileOrderStats(&positions[i], ep)
 	}
+}
+
+func matchEventParts(parts []fillPart, upd models.PositionUpdate, evTime time.Time) []int {
+	if upd.ExecutionUID != "" {
+		out := make([]int, 0)
+		for i, part := range parts {
+			if part.Fill.FillID == upd.ExecutionUID {
+				out = append(out, i)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+
+	if evTime.IsZero() {
+		return nil
+	}
+
+	eventPrice := upd.ExecutionPrice.Float64()
+	eventSize := math.Abs(upd.ExecutionSize.Float64())
+	if eventPrice == 0 || eventSize == 0 {
+		return nil
+	}
+
+	out := make([]int, 0)
+	for i, part := range parts {
+		if part.At.Sub(evTime) > eventTimeTolerance || evTime.Sub(part.At) > eventTimeTolerance {
+			continue
+		}
+		if !floatClose(part.Fill.Price.Float64(), eventPrice) {
+			continue
+		}
+		if !floatClose(part.Fill.Size.Float64(), eventSize) && !floatClose(part.Size, eventSize) {
+			continue
+		}
+		out = append(out, i)
+	}
+	return out
+}
+
+func applyEventStatsToOrders(pos *domain.Position, ep episode, partIndexes []int, fee, pnl, funding float64) (float64, float64, float64) {
+	var allocatedFee, allocatedPnl, allocatedFunding float64
+	for _, idx := range partIndexes {
+		if idx < 0 || idx >= len(ep.Parts) || idx >= len(pos.Orders) {
+			continue
+		}
+		part := ep.Parts[idx]
+		fillSize := part.Fill.Size.Float64()
+		if fillSize <= 0 {
+			continue
+		}
+
+		ratio := part.Size / fillSize
+		if ratio < 0 {
+			continue
+		}
+		if ratio > 1 {
+			ratio = 1
+		}
+
+		partFee := fee * ratio
+		partPnl := pnl * ratio
+		partFunding := funding * ratio
+		pos.Orders[idx].Trade.Commission = helpers.Round8(pos.Orders[idx].Trade.Commission + partFee)
+		pos.Orders[idx].Trade.Profit = helpers.Round8(pos.Orders[idx].Trade.Profit + partPnl)
+		allocatedFee += partFee
+		allocatedPnl += partPnl
+		allocatedFunding += partFunding
+	}
+	return allocatedFee, allocatedPnl, allocatedFunding
+}
+
+func reconcileOrderStats(pos *domain.Position, ep episode) {
+	if len(pos.Orders) == 0 {
+		return
+	}
+
+	var orderFee, orderPnl float64
+	for _, order := range pos.Orders {
+		orderFee += order.Trade.Commission
+		orderPnl += order.Trade.Profit
+	}
+
+	targetIdx := len(pos.Orders) - 1
+	searchFrom := len(ep.Parts)
+	if len(pos.Orders) < searchFrom {
+		searchFrom = len(pos.Orders)
+	}
+	for i := searchFrom - 1; i >= 0; i-- {
+		if ep.Parts[i].Sign != ep.OpenSign {
+			targetIdx = i
+			break
+		}
+	}
+
+	feeGap := helpers.Round8(pos.Commission - orderFee)
+	if math.Abs(feeGap) > sizeEpsilon {
+		pos.Orders[targetIdx].Trade.Commission = helpers.Round8(pos.Orders[targetIdx].Trade.Commission + feeGap)
+	}
+
+	pnlGap := helpers.Round8(pos.Pnl - orderPnl)
+	if math.Abs(pnlGap) > sizeEpsilon {
+		pos.Orders[targetIdx].Trade.Profit = helpers.Round8(pos.Orders[targetIdx].Trade.Profit + pnlGap)
+	}
+}
+
+func floatClose(a, b float64) bool {
+	tolerance := math.Max(math.Max(math.Abs(a), math.Abs(b))*1e-8, 1e-8)
+	return math.Abs(a-b) <= tolerance
 }
 
 func sameSymbol(eventSymbol, episodeSymbol string, pairBySymbol map[string]string) bool {

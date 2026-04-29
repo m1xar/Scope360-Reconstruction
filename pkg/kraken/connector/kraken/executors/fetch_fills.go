@@ -10,15 +10,21 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/kraken/connector/kraken/models"
 )
 
-const fillsPath = "/derivatives/api/v3/fills"
+const (
+	fillsPath            = "/derivatives/api/v3/fills"
+	fillsPageSize        = 100
+	fillRateLimitedTries = 4
+	fillPaginatedPace    = 600 * time.Millisecond
+)
 
 func FetchFills(client *resty.Client, lastFillTime string) ([]models.Fill, error) {
 	params := make(map[string]string)
 	if lastFillTime != "" {
+		time.Sleep(fillPaginatedPace)
 		params["lastFillTime"] = lastFillTime
 	}
 
-	resp, err := kraken.DoGet[models.FillResponse](client, fillsPath, params)
+	resp, err := kraken.DoGetWithRateLimitRetry[models.FillResponse](client, fillsPath, params, fillRateLimitedTries)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +90,7 @@ func FetchAllFills(client *resty.Client, days int) ([]models.Fill, error) {
 		if cutoff != nil && oldest.Before(*cutoff) {
 			break
 		}
-		if len(page) < 100 {
+		if len(page) < fillsPageSize {
 			break
 		}
 		lastFillTime = FormatKrakenTime(oldest)

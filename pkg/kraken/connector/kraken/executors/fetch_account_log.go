@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	accountLogPath     = "/api/history/v3/account-log"
-	accountLogPageSize = 500
+	accountLogPath             = "/api/history/v3/account-log"
+	accountLogPageSize         = 5000
+	accountLogRateLimitedTries = 4
 )
 
 func FetchAllAccountLog(client *resty.Client, days int) ([]models.AccountLog, error) {
@@ -30,7 +31,7 @@ func FetchAllAccountLog(client *resty.Client, days int) ([]models.AccountLog, er
 			params["from"] = fmt.Sprint(lastID + 1)
 		}
 
-		resp, err := kraken.DoGet[models.AccountLogResponse](client, accountLogPath, params)
+		resp, err := kraken.DoGetWithRateLimitRetry[models.AccountLogResponse](client, accountLogPath, params, accountLogRateLimitedTries)
 		if err != nil {
 			return nil, err
 		}

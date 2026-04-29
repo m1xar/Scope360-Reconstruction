@@ -10,6 +10,7 @@ import (
 )
 
 const positionEventsPath = "/api/history/v3/positions"
+const positionEventsRateLimitedTries = 4
 
 func FetchAllPositionEvents(client *resty.Client, days int) ([]models.PositionEventElement, error) {
 	params := map[string]string{
@@ -28,7 +29,7 @@ func FetchAllPositionEvents(client *resty.Client, days int) ([]models.PositionEv
 			delete(params, "continuation_token")
 		}
 
-		resp, err := kraken.DoGet[models.PositionEventsResponse](client, positionEventsPath, params)
+		resp, err := kraken.DoGetWithRateLimitRetry[models.PositionEventsResponse](client, positionEventsPath, params, positionEventsRateLimitedTries)
 		if err != nil {
 			return nil, err
 		}

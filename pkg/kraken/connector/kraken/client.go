@@ -6,8 +6,10 @@ import (
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -22,6 +24,7 @@ const (
 	defaultRetryCount   = 2
 	defaultRetryWait    = 300 * time.Millisecond
 	defaultRetryMaxWait = 1 * time.Second
+	defaultRateWait     = 2 * time.Second
 )
 
 var lastNonce int64
@@ -35,6 +38,7 @@ type HTTPError struct {
 	StatusCode int
 	Status     string
 	Body       string
+	Header     http.Header
 }
 
 func (e *HTTPError) Error() string {
@@ -151,6 +155,7 @@ func DoGet[T any](client *resty.Client, path string, params map[string]string) (
 			StatusCode: resp.StatusCode(),
 			Status:     resp.Status(),
 			Body:       string(resp.Body()),
+			Header:     resp.Header(),
 		}
 	}
 
@@ -159,6 +164,82 @@ func DoGet[T any](client *resty.Client, path string, params map[string]string) (
 	}
 
 	return out, nil
+}
+
+func DoGetWithRateLimitRetry[T any](client *resty.Client, path string, params map[string]string, attempts int) (T, error) {
+	if attempts < 1 {
+		attempts = 1
+	}
+
+	var zero T
+	for attempt := 1; attempt <= attempts; attempt++ {
+		out, err := DoGet[T](client, path, params)
+		if err == nil {
+			return out, nil
+		}
+		if attempt == attempts || !IsRateLimitError(err) {
+			return zero, err
+		}
+		time.Sleep(RateLimitWait(err))
+	}
+	return zero, nil
+}
+
+func IsRateLimitError(err error) bool {
+	var httpErr *HTTPError
+	if errors.As(err, &httpErr) {
+		if httpErr.StatusCode == http.StatusTooManyRequests {
+			return true
+		}
+		if strings.Contains(strings.ToLower(httpErr.Body), "apilimitexceeded") {
+			return true
+		}
+	}
+
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		msg := strings.ToLower(apiErr.Message)
+		return strings.Contains(msg, "apilimitexceeded") || strings.Contains(msg, "rate limit")
+	}
+	return false
+}
+
+func RateLimitWait(err error) time.Duration {
+	var httpErr *HTTPError
+	if errors.As(err, &httpErr) && httpErr.Header != nil {
+		if wait, ok := parseWaitHeader(httpErr.Header.Get("Retry-After")); ok {
+			return wait
+		}
+		if wait, ok := parseWaitHeader(httpErr.Header.Get("rate-limit-reset")); ok {
+			return wait
+		}
+	}
+	return defaultRateWait
+}
+
+func parseWaitHeader(raw string) (time.Duration, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	if sec, err := strconv.ParseFloat(raw, 64); err == nil {
+		if sec > 1_000_000_000 {
+			wait := time.Until(time.Unix(int64(sec), 0))
+			if wait > 0 {
+				return wait, true
+			}
+			return defaultRetryWait, true
+		}
+		return time.Duration(sec * float64(time.Second)), true
+	}
+	if at, err := http.ParseTime(raw); err == nil {
+		wait := time.Until(at)
+		if wait > 0 {
+			return wait, true
+		}
+		return defaultRetryWait, true
+	}
+	return 0, false
 }
 
 func checkAPIError(body []byte) error {
