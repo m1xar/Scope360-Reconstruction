@@ -3,6 +3,7 @@ package mexc
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -49,7 +50,14 @@ func GetBuiltPositions(
 		positions = trimmed
 	}
 
-	builders.AttachNotionalBalanceInit(&positions)
+	currentEquity, err := fetchStableEquity(client)
+	if err == nil {
+		transfers, trErr := executors.FetchAllTransferRecords(client)
+		if trErr == nil && len(transfers) > 0 {
+			snapshots := builders.BuildSyntheticBalanceSnapshots(currentEquity, transfers, positions)
+			builders.AttachBalanceInit(&positions, snapshots)
+		}
+	}
 
 	return positions, nil
 }
@@ -108,7 +116,17 @@ func GetBalanceSnapshots(
 		return nil, err
 	}
 
-	snapshots := builders.BuildZeroBalanceSnapshots(positions)
+	currentEquity, err := fetchStableEquity(client)
+	if err != nil {
+		return nil, err
+	}
+
+	transfers, err := executors.FetchAllTransferRecords(client)
+	if err != nil {
+		return nil, err
+	}
+
+	snapshots := builders.BuildSyntheticBalanceSnapshots(currentEquity, transfers, positions)
 
 	cutoff := helpers.CutoffFromDays(days)
 	if cutoff != nil {
@@ -134,12 +152,11 @@ func GetCurrentBalance(
 ) (*float64, error) {
 	mexcclient.AttachAuth(client, creds)
 
-	asset, err := executors.FetchUSDTAsset(client)
+	val, err := fetchStableEquity(client)
 	if err != nil {
 		return nil, err
 	}
 
-	val := helpers.Round8(asset.Equity)
 	return &val, nil
 }
 
@@ -190,4 +207,39 @@ func GetCandles(
 		client, symbol, interval,
 		startTime.UnixMilli(), endTime.UnixMilli(),
 	)
+}
+
+func fetchStableEquity(client *resty.Client) (float64, error) {
+	assets, err := executors.FetchAssets(client)
+	if err == nil {
+		var total float64
+		var found bool
+		for _, asset := range assets {
+			if isStableCurrency(asset.Currency) {
+				total += asset.Equity
+				found = true
+			}
+		}
+		if found {
+			return helpers.Round8(total), nil
+		}
+	}
+
+	asset, fallbackErr := executors.FetchUSDTAsset(client)
+	if fallbackErr != nil {
+		if err != nil {
+			return 0, err
+		}
+		return 0, fallbackErr
+	}
+	return helpers.Round8(asset.Equity), nil
+}
+
+func isStableCurrency(currency string) bool {
+	switch strings.ToUpper(strings.TrimSpace(currency)) {
+	case "USDT", "USDC":
+		return true
+	default:
+		return false
+	}
 }
