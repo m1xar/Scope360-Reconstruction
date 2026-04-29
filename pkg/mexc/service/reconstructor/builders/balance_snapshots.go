@@ -71,7 +71,7 @@ func BuildSyntheticBalanceSnapshots(
 		if ev.At.Before(start) {
 			continue
 		}
-		balance = helpers.Round8(balance + ev.Delta)
+		balance = clampBalance(helpers.Round8(balance + ev.Delta))
 		snapshots = append(snapshots, domain.UserBalanceSnapshot{
 			CreatedAt: ev.At,
 			Balance:   balance,
@@ -80,10 +80,17 @@ func BuildSyntheticBalanceSnapshots(
 
 	snapshots = append(snapshots, domain.UserBalanceSnapshot{
 		CreatedAt: time.Now().UTC(),
-		Balance:   helpers.Round8(currentEquity),
+		Balance:   clampBalance(helpers.Round8(currentEquity)),
 	})
 
 	return snapshots
+}
+
+func clampBalance(balance float64) float64 {
+	if balance < 0 {
+		return 0
+	}
+	return balance
 }
 
 func isStableCurrency(currency string) bool {

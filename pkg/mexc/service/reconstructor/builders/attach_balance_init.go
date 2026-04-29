@@ -26,5 +26,8 @@ func AttachBalanceInit(positions *[]domain.Position, snapshots []domain.UserBala
 		if idx >= 0 {
 			pos.BalanceInit = helpers.Round8(sorted[idx].Balance)
 		}
+		if pos.BalanceInit < 1 {
+			pos.BalanceInit = helpers.Round8(pos.Amount * pos.EntryPrice)
+		}
 	}
 }
