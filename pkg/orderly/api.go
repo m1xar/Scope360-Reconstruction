@@ -157,12 +157,47 @@ func GetCandles(
 func GetOpenPositions(client *resty.Client, cfg connector.Config) ([]domain.OpenPosition, error) {
 	c := newClient(client, cfg)
 
-	positions, err := executors.FetchOpenPositions(c)
+	rawPositions, err := executors.FetchOpenPositions(c)
 	if err != nil {
 		return nil, err
 	}
 
-	return builders.BuildOpenPositions(positions), nil
+	positions := builders.BuildOpenPositions(rawPositions)
+	enrichOpenPositionOrders(c, positions)
+	return positions, nil
+}
+
+func enrichOpenPositionOrders(c *connector.Client, positions []domain.OpenPosition) {
+	if len(positions) == 0 {
+		return
+	}
+
+	trades, err := executors.FetchAllTrades(c, "", 0, 0)
+	if err != nil {
+		return
+	}
+
+	orders, err := executors.FetchFilledOrders(c, "", 0, 0)
+	orderMap := map[int64]models.OrderlyOrder{}
+	if err == nil {
+		orderMap = helpers.BuildOrderMap(orders)
+	}
+
+	for i := range positions {
+		pos := &positions[i]
+		openMs := pos.OpenTime.UnixMilli()
+		matched := make([]models.OrderlyTrade, 0)
+		for _, t := range trades {
+			if helpers.NormalizeSymbol(t.Symbol) != pos.Pair {
+				continue
+			}
+			if t.ExecutedTimestamp < openMs {
+				continue
+			}
+			matched = append(matched, t)
+		}
+		pos.Orders = builders.BuildOpenOrdersFromTrades(matched, orderMap, pos.ID)
+	}
 }
 
 func ValidateWalletSubscription(address, signature, message string) (bool, error) {

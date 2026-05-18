@@ -3,6 +3,7 @@ package okx
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -171,7 +172,64 @@ func GetOpenPositions(
 	for _, r := range raw {
 		positions = append(positions, builders.BuildOpenPosition(r))
 	}
+	enrichOpenPositionOrders(client, baseURL, raw, positions)
 	return positions, nil
+}
+
+func enrichOpenPositionOrders(
+	client *resty.Client,
+	baseURL string,
+	raw []models.OpenPosition,
+	positions []domain.OpenPosition,
+) {
+	if len(raw) == 0 || len(positions) == 0 {
+		return
+	}
+
+	startMs := int64(0)
+	for _, r := range raw {
+		t := helpers.MustInt64(r.CTime)
+		if t == 0 {
+			continue
+		}
+		if startMs == 0 || t < startMs {
+			startMs = t
+		}
+	}
+	if startMs == 0 {
+		return
+	}
+
+	orders, err := executors.FetchAllSwapAndFuturesOrders(client, baseURL, startMs)
+	if err != nil {
+		return
+	}
+
+	for i := range positions {
+		if i >= len(raw) {
+			return
+		}
+		r := raw[i]
+		openMs := helpers.MustInt64(r.CTime)
+		posSide := strings.ToLower(strings.TrimSpace(r.PosSide))
+		matched := make([]models.Order, 0)
+
+		for _, ord := range orders {
+			if ord.InstId != r.InstId {
+				continue
+			}
+			ordPosSide := strings.ToLower(strings.TrimSpace(ord.PosSide))
+			if posSide != "" && posSide != "net" && ordPosSide != "" && ordPosSide != "net" && ordPosSide != posSide {
+				continue
+			}
+			if helpers.MustInt64(ord.UTime) < openMs {
+				continue
+			}
+			matched = append(matched, ord)
+		}
+
+		positions[i].Orders = helpers.BuildOrders(matched, positions[i].ID)
+	}
 }
 
 func GetBalanceSnapshots(

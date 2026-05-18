@@ -4,9 +4,10 @@ import (
 	"math"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/google/uuid"
+	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/hyperliquid/executors"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
-	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
 )
 
@@ -34,8 +35,13 @@ func BuildOpenPositionsFromClearinghouse(
 
 		size := helpers.MustFloat(pos.Szi)
 		entry := helpers.MustFloat(pos.EntryPx)
+		positionID, err := uuid.NewV7()
+		if err != nil {
+			continue
+		}
 
 		out = append(out, domain.OpenPosition{
+			ID:           positionID,
 			Pair:         pos.Coin + "USDC",
 			Amount:       math.Abs(helpers.Round8(size)),
 			EntryPrice:   helpers.Round8(entry),

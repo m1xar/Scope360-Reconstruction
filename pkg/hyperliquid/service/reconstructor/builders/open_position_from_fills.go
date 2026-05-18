@@ -1,10 +1,12 @@
 package builders
 
 import (
+	"strconv"
 	"time"
 
-	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
+	"github.com/google/uuid"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
 )
 
@@ -26,6 +28,7 @@ func BuildOpenPositionsFromFills(
 		openSize     float64
 		closeSize    float64
 		openNotional float64
+		fills        []models.RawFill
 	}
 
 	aggs := make(map[string]*agg)
@@ -48,6 +51,7 @@ func BuildOpenPositionsFromFills(
 		px := helpers.MustFloat(f.Px)
 
 		sz := helpers.MustFloat(f.Sz)
+		a.fills = append(a.fills, f)
 		if helpers.IsOpen(f.Dir) {
 			a.openSize += sz
 			a.openNotional += sz * px
@@ -115,15 +119,72 @@ func BuildOpenPositionsFromFills(
 			entry = a.openNotional / a.openSize
 		}
 
+		positionID, err := uuid.NewV7()
+		if err != nil {
+			continue
+		}
+
 		out = append(out, domain.OpenPosition{
+			ID:           positionID,
 			Pair:         a.pair,
 			Amount:       helpers.Round8(net),
 			Side:         a.side,
 			EntryPrice:   helpers.Round8(entry),
 			CurrentPrice: helpers.Round8(coinPrice[a.coin]),
 			OpenTime:     time.UnixMilli(a.openTimeMs).UTC(),
+			Orders:       buildOpenOrdersFromFills(a.fills, positionID),
 		})
 	}
 
 	return out
+}
+
+func buildOpenOrdersFromFills(fills []models.RawFill, positionID uuid.UUID) []domain.Order {
+	orders := make([]domain.Order, 0, len(fills))
+
+	for _, f := range fills {
+		orderID, err := uuid.NewV7()
+		if err != nil {
+			continue
+		}
+
+		side := "SELL"
+		if f.Side == "B" {
+			side = "BUY"
+		}
+
+		updatedAt := time.UnixMilli(f.Time).UTC()
+		price := helpers.Round8(helpers.MustFloat(f.Px))
+		amount := helpers.Round8(helpers.MustFloat(f.Sz))
+		fee := helpers.Round8(helpers.MustFloat(f.Fee))
+		profit := helpers.Round8(helpers.MustFloat(f.ClosedPnl))
+
+		trade := domain.Trade{
+			OrderID:    orderID,
+			Side:       side,
+			Price:      price,
+			Amount:     amount,
+			Commission: fee,
+			Profit:     profit,
+			DoneAt:     updatedAt,
+		}
+
+		orders = append(orders, domain.Order{
+			ID:              orderID,
+			PositionID:      positionID,
+			ExchangeOrderID: strconv.FormatInt(f.Tid, 10),
+			Type:            "MARKET",
+			Status:          "FILLED",
+			Side:            side,
+			Amount:          amount,
+			AmountFilled:    amount,
+			AveragePrice:    price,
+			StopPrice:       price,
+			OriginalPrice:   price,
+			UpdatedAt:       updatedAt,
+			Trade:           trade,
+		})
+	}
+
+	return orders
 }

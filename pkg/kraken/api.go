@@ -134,7 +134,50 @@ func GetOpenPositions(
 		ticker := tickerBySymbol[strings.ToUpper(pos.Symbol)]
 		out = append(out, builders.BuildOpenPosition(pos, ticker))
 	}
+	enrichOpenPositionOrders(client, rawPositions, out)
 	return out, nil
+}
+
+func enrichOpenPositionOrders(
+	client *resty.Client,
+	raw []models.OpenPosition,
+	positions []domain.OpenPosition,
+) {
+	if len(raw) == 0 || len(positions) == 0 {
+		return
+	}
+
+	fills, err := executors.FetchAllFills(client, 0)
+	if err != nil {
+		return
+	}
+
+	posIdx := 0
+	for _, rawPos := range raw {
+		if rawPos.Size.Float64() <= 0 {
+			continue
+		}
+		if posIdx >= len(positions) {
+			return
+		}
+
+		openTime := positions[posIdx].OpenTime
+		symbol := strings.ToUpper(rawPos.Symbol)
+		matched := make([]models.Fill, 0)
+		for _, fill := range fills {
+			if strings.ToUpper(fill.Symbol) != symbol {
+				continue
+			}
+			fillTime, err := helpers.ParseTime(fill.FillTime)
+			if err != nil || fillTime.Before(openTime) {
+				continue
+			}
+			matched = append(matched, fill)
+		}
+
+		positions[posIdx].Orders = builders.BuildOpenOrdersFromFills(matched, positions[posIdx].ID)
+		posIdx++
+	}
 }
 
 func GetBalanceSnapshots(

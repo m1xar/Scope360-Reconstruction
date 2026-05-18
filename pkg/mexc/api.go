@@ -101,7 +101,53 @@ func GetOpenPositions(
 		}
 		positions = append(positions, builders.BuildOpenPosition(r))
 	}
+	enrichOpenPositionOrders(client, raw, positions)
 	return positions, nil
+}
+
+func enrichOpenPositionOrders(
+	client *resty.Client,
+	raw []models.OpenPosition,
+	positions []domain.OpenPosition,
+) {
+	if len(raw) == 0 || len(positions) == 0 {
+		return
+	}
+
+	startMs := int64(0)
+	for _, r := range raw {
+		if r.HoldVol <= 0 {
+			continue
+		}
+		if startMs == 0 || r.CreateTime < startMs {
+			startMs = r.CreateTime
+		}
+	}
+	if startMs == 0 {
+		return
+	}
+
+	orders, err := executors.FetchAllHistoryOrders(client, startMs)
+	if err != nil {
+		return
+	}
+
+	byPositionID := make(map[int64][]models.Order)
+	for _, ord := range orders {
+		byPositionID[ord.PositionId] = append(byPositionID[ord.PositionId], ord)
+	}
+
+	posIdx := 0
+	for _, r := range raw {
+		if r.HoldVol <= 0 {
+			continue
+		}
+		if posIdx >= len(positions) {
+			return
+		}
+		positions[posIdx].Orders = builders.BuildOrders(byPositionID[r.PositionId], positions[posIdx].ID)
+		posIdx++
+	}
 }
 
 func GetBalanceSnapshots(
