@@ -13,6 +13,7 @@ func BuildPosition(
 	hp models.HistoryPosition,
 	orders []models.Order,
 	funding float64,
+	contractSize float64,
 ) (domain.Position, error) {
 	posID, err := uuid.NewV7()
 	if err != nil {
@@ -21,7 +22,7 @@ func BuildPosition(
 
 	entry := hp.OpenAvgPrice
 	exit := hp.CloseAvgPrice
-	amount := hp.CloseVol
+	amount := contractVolumeToBase(hp.CloseVol, contractSize)
 	pnl := hp.Realised
 	side := helpers.SideFromPositionType(hp.PositionType)
 	start := helpers.TimeFromMs(hp.CreateTime)
@@ -88,10 +89,10 @@ func BuildPosition(
 
 	var domainOrders []domain.Order
 	if len(orders) > 0 {
-		domainOrders = BuildOrders(orders, posID)
+		domainOrders = buildOrders(orders, posID, contractSize)
 	}
 	if len(domainOrders) == 0 {
-		domainOrders = buildSyntheticOrders(hp, posID)
+		domainOrders = buildSyntheticOrders(hp, posID, contractSize)
 	}
 
 	if len(domainOrders) > 0 {
@@ -134,6 +135,10 @@ func BuildPosition(
 }
 
 func BuildOrders(orders []models.Order, posID uuid.UUID) []domain.Order {
+	return buildOrders(orders, posID, 0)
+}
+
+func buildOrders(orders []models.Order, posID uuid.UUID, contractSize float64) []domain.Order {
 	result := make([]domain.Order, 0, len(orders))
 
 	for _, ord := range orders {
@@ -148,7 +153,7 @@ func BuildOrders(orders []models.Order, posID uuid.UUID) []domain.Order {
 
 		side := helpers.OrderSideFromMEXC(ord.Side)
 		avgPx := helpers.Round8(ord.DealAvgPrice)
-		fillSz := helpers.Round8(ord.DealVol)
+		fillSz := helpers.Round8(contractVolumeToBase(ord.DealVol, contractSize))
 		fee := helpers.Round8(math.Abs(ord.TakerFee) + math.Abs(ord.MakerFee))
 		profit := helpers.Round8(ord.Profit)
 		doneAt := helpers.TimeFromMs(ord.UpdateTime)
@@ -160,7 +165,7 @@ func BuildOrders(orders []models.Order, posID uuid.UUID) []domain.Order {
 			Type:            helpers.OrderTypeFromMEXC(ord.OrderType),
 			Status:          "FILLED",
 			Side:            side,
-			Amount:          helpers.Round8(ord.DealVol),
+			Amount:          fillSz,
 			AmountFilled:    fillSz,
 			AveragePrice:    avgPx,
 			StopPrice:       helpers.Round8(ord.StopLossPrice),
@@ -181,10 +186,10 @@ func BuildOrders(orders []models.Order, posID uuid.UUID) []domain.Order {
 	return result
 }
 
-func buildSyntheticOrders(hp models.HistoryPosition, posID uuid.UUID) []domain.Order {
+func buildSyntheticOrders(hp models.HistoryPosition, posID uuid.UUID, contractSize float64) []domain.Order {
 	entry := hp.OpenAvgPrice
 	exit := hp.CloseAvgPrice
-	amount := hp.CloseVol
+	amount := contractVolumeToBase(hp.CloseVol, contractSize)
 	fee := math.Abs(hp.HoldFee)
 	pnl := hp.Realised
 	openTime := helpers.TimeFromMs(hp.CreateTime)
@@ -246,6 +251,13 @@ func buildSyntheticOrders(hp models.HistoryPosition, posID uuid.UUID) []domain.O
 			},
 		},
 	}
+}
+
+func contractVolumeToBase(volume, contractSize float64) float64 {
+	if contractSize <= 0 {
+		return volume
+	}
+	return volume * contractSize
 }
 
 func ApplyMAEMFE(pos *domain.Position, high, low *float64) {

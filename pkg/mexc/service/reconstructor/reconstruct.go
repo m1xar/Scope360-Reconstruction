@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/connector/mexc/executors"
+	"github.com/m1xar/scope360-reconstruction/pkg/mexc/connector/mexc/models"
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/service/reconstructor/workers"
@@ -22,6 +23,7 @@ func ReconstructClosedPositions(client *resty.Client) ([]domain.Position, error)
 	if len(closedPositions) == 0 {
 		return []domain.Position{}, nil
 	}
+	contractSizes := fetchContractSizes(client, closedPositions)
 
 	oldestMs := closedPositions[0].CreateTime
 	for _, cp := range closedPositions[1:] {
@@ -60,7 +62,7 @@ func ReconstructClosedPositions(client *resty.Client) ([]domain.Position, error)
 			fundingRecords, cp.Symbol, cp.CreateTime, cp.UpdateTime,
 		)
 
-		pos, err := builders.BuildPosition(cp, posOrders, funding)
+		pos, err := builders.BuildPosition(cp, posOrders, funding, contractSizes[cp.Symbol])
 		if err != nil {
 			continue
 		}
@@ -105,4 +107,30 @@ func ReconstructClosedPositions(client *resty.Client) ([]domain.Position, error)
 	})
 
 	return positions, nil
+}
+
+func fetchContractSizes(client *resty.Client, positions []models.HistoryPosition) map[string]float64 {
+	sizes := make(map[string]float64)
+
+	details, err := executors.FetchAllContractDetails(client)
+	if err == nil {
+		for _, detail := range details {
+			if detail.Symbol != "" && detail.ContractSize > 0 {
+				sizes[detail.Symbol] = detail.ContractSize
+			}
+		}
+	}
+
+	for _, pos := range positions {
+		if pos.Symbol == "" || sizes[pos.Symbol] > 0 {
+			continue
+		}
+		detail, err := executors.FetchContractDetail(client, pos.Symbol)
+		if err != nil || detail.ContractSize <= 0 {
+			continue
+		}
+		sizes[pos.Symbol] = detail.ContractSize
+	}
+
+	return sizes
 }

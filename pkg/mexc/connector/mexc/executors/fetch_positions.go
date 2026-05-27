@@ -49,3 +49,15 @@ const openPositionsPath = "/api/v1/private/position/open_positions"
 func FetchOpenPositions(client *resty.Client) ([]models.OpenPosition, error) {
 	return mexc.DoGet[[]models.OpenPosition](client, openPositionsPath, nil)
 }
+
+const contractDetailPath = "/api/v1/contract/detail"
+
+func FetchAllContractDetails(client *resty.Client) ([]models.ContractDetail, error) {
+	return mexc.DoGet[[]models.ContractDetail](client, contractDetailPath, nil)
+}
+
+func FetchContractDetail(client *resty.Client, symbol string) (models.ContractDetail, error) {
+	return mexc.DoGet[models.ContractDetail](client, contractDetailPath, map[string]string{
+		"symbol": symbol,
+	})
+}
