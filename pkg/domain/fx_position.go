@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-type Position struct {
+type FXPosition struct {
 	ID               uuid.UUID
 	Side             string
 	Pair             string
@@ -16,7 +16,7 @@ type Position struct {
 	Pnl              float64
 	NetPnl           float64
 	Commission       float64
-	Funding          float64
+	Swap             float64
 	MAE              *float64
 	MFE              *float64
 	RR               *float64
