@@ -13,4 +13,6 @@ type Bill struct {
 	Fee      string `json:"fee"`
 	Ccy      string `json:"ccy"`
 	Ts       string `json:"ts"`
+	From     string `json:"from"`
+	To       string `json:"to"`
 }

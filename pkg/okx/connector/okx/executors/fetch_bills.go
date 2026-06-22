@@ -16,7 +16,7 @@ const billsPageLimit = 100
 
 const billsWindowSize = 90 * 24 * time.Hour
 
-func FetchAllBillsByInstType(client *resty.Client, baseURL, instType string, startMs int64, billType string) ([]models.Bill, error) {
+func FetchAllBills(client *resty.Client, baseURL, instType string, startMs int64, billType string) ([]models.Bill, error) {
 	var result []models.Bill
 	now := time.Now().UnixMilli()
 
@@ -34,10 +34,12 @@ func FetchAllBillsByInstType(client *resty.Client, baseURL, instType string, sta
 		after := ""
 		for {
 			params := map[string]string{
-				"instType": instType,
-				"limit":    fmt.Sprintf("%d", billsPageLimit),
-				"begin":    fmt.Sprint(windowBegin),
-				"end":      fmt.Sprint(windowEnd),
+				"limit": fmt.Sprintf("%d", billsPageLimit),
+				"begin": fmt.Sprint(windowBegin),
+				"end":   fmt.Sprint(windowEnd),
+			}
+			if instType != "" {
+				params["instType"] = instType
 			}
 			if billType != "" {
 				params["type"] = billType
@@ -79,11 +81,11 @@ func FetchAllSwapAndFuturesBills(client *resty.Client, baseURL string, startMs i
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		swapBills, swapErr = FetchAllBillsByInstType(client, baseURL, "SWAP", startMs, billType)
+		swapBills, swapErr = FetchAllBills(client, baseURL, "SWAP", startMs, billType)
 	}()
 	go func() {
 		defer wg.Done()
-		futuresBills, futuresErr = FetchAllBillsByInstType(client, baseURL, "FUTURES", startMs, billType)
+		futuresBills, futuresErr = FetchAllBills(client, baseURL, "FUTURES", startMs, billType)
 	}()
 	wg.Wait()
 

@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/binance"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/hyperliquid/executors"
 	hlmodels "github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
-	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor/envelope"
@@ -244,6 +244,40 @@ func GetCurrentBalance(
 		return nil, nil
 	}
 	return &balanceSnapshots[len(balanceSnapshots)-1].Balance, nil
+}
+
+func GetTransactions(
+	client *resty.Client,
+	endpoint string,
+	user string,
+	days int,
+) ([]domain.Transaction, error) {
+	if client == nil {
+		client = newDefaultClient()
+	}
+
+	startMs := int64(0)
+	cutoff := helpers.CutoffFromDays(days)
+	if cutoff != nil {
+		startMs = cutoff.UnixMilli()
+	}
+
+	updates, err := executors.FetchAllNonFundingLedgerUpdates(client, endpoint, user, startMs, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	transactions := builders.BuildTransactions(updates)
+	if cutoff != nil {
+		filtered := transactions[:0]
+		for _, tx := range transactions {
+			if !tx.Time.Before(*cutoff) {
+				filtered = append(filtered, tx)
+			}
+		}
+		transactions = filtered
+	}
+	return transactions, nil
 }
 
 func GetFundings(

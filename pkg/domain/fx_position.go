@@ -2,12 +2,10 @@ package domain
 
 import (
 	"time"
-
-	"github.com/google/uuid"
 )
 
 type FXPosition struct {
-	ID               uuid.UUID
+	ID               string
 	Side             string
 	Pair             string
 	Amount           float64
@@ -30,6 +28,6 @@ type FXPosition struct {
 	Status           *string
 	CreatedAt        time.Time
 	ClosedAt         *time.Time
-	Orders           []Order
+	Orders           []FXOrder
 	BalanceInit      float64
 }

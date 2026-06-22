@@ -80,7 +80,7 @@ func GetClosedPositionByExactMatch(
 func GetOpenPositions(
 	client *connector.Client,
 	cfg connector.Config,
-) ([]domain.OpenPosition, error) {
+) ([]domain.FXOpenPosition, error) {
 	ctx := context.Background()
 	c := newClient(client, cfg)
 
@@ -124,63 +124,62 @@ func GetBalanceSnapshots(
 	return snapshots, nil
 }
 
-func GetCurrentBalance(
+func GetAccountInfo(
 	client *connector.Client,
 	cfg connector.Config,
-) (*float64, error) {
-	positions, err := GetBuiltPositions(client, cfg, 0)
-	if err != nil {
-		return nil, err
-	}
-	if len(positions) > 0 {
-		sort.Slice(positions, func(i, j int) bool {
-			if positions[i].ClosedAt == nil {
-				return true
-			}
-			if positions[j].ClosedAt == nil {
-				return false
-			}
-			return positions[i].ClosedAt.Before(*positions[j].ClosedAt)
-		})
-		last := positions[len(positions)-1]
-		balance := last.BalanceInit + last.NetPnl
-		return &balance, nil
-	}
-
+) (*domain.FXAccountInfo, error) {
 	ctx := context.Background()
-	trader, err := executors.FetchTrader(ctx, newClient(client, cfg))
+	c := newClient(client, cfg)
+	trader, err := executors.FetchTrader(ctx, c)
 	if err != nil {
 		return nil, err
 	}
 	if trader == nil {
 		return nil, nil
 	}
-	balance := helpers.Money(trader.GetBalance(), trader.GetMoneyDigits())
-	return &balance, nil
-}
 
-func GetSwaps(
-	client *connector.Client,
-	cfg connector.Config,
-	days int,
-) ([]domain.UserSwap, error) {
-	ctx := context.Background()
-	deals, _, symbols, session, err := loadHistory(ctx, newClient(client, cfg), days)
+	assets, err := executors.FetchAssets(ctx, c)
 	if err != nil {
 		return nil, err
 	}
-	swaps := builders.BuildSwaps(deals, symbols, session)
+	currency, ok := assetNameByID(assets, trader.GetDepositAssetId())
+	if !ok {
+		return nil, fmt.Errorf("ctrader deposit asset %d not found", trader.GetDepositAssetId())
+	}
+
+	return &domain.FXAccountInfo{
+		Balance:  helpers.Money(trader.GetBalance(), trader.GetMoneyDigits()),
+		Leverage: uint64(trader.GetLeverageInCents() / 100),
+		Currency: currency,
+	}, nil
+}
+
+func GetTransactions(
+	client *connector.Client,
+	cfg connector.Config,
+	days int,
+) ([]domain.Transaction, error) {
+	ctx := context.Background()
+	c := newClient(client, cfg)
+	from, to := helpers.HistoryRange(days)
+
+	cashFlow, err := executors.FetchCashFlowHistory(ctx, c, from, to)
+	if err != nil {
+		return nil, err
+	}
+
+	transactions := builders.BuildTransactions(cashFlow)
 	cutoff := helpers.CutoffFromDays(days)
 	if cutoff != nil {
-		filtered := swaps[:0]
-		for _, swap := range swaps {
-			if !swap.CreatedAt.Before(*cutoff) {
-				filtered = append(filtered, swap)
+		filtered := transactions[:0]
+		for _, tx := range transactions {
+			if !tx.Time.Before(*cutoff) {
+				filtered = append(filtered, tx)
 			}
 		}
-		swaps = filtered
+		transactions = filtered
 	}
-	return swaps, nil
+	return transactions, nil
 }
 
 func GetCandles(
@@ -294,4 +293,14 @@ func fetchCurrentPrices(ctx context.Context, c *connector.Client, reconcile *pb.
 		}
 	}
 	return prices
+}
+
+func assetNameByID(assets []*pb.ProtoOAAsset, id int64) (string, bool) {
+	for _, asset := range assets {
+		if asset == nil || asset.GetAssetId() != id {
+			continue
+		}
+		return asset.GetName(), true
+	}
+	return "", false
 }

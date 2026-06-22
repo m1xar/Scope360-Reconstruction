@@ -118,6 +118,36 @@ func GetCurrentBalance(client *resty.Client, cfg connector.Config) (*float64, er
 	return &balance, nil
 }
 
+func GetTransactions(client *resty.Client, cfg connector.Config, days int) ([]domain.Transaction, error) {
+	c := newClient(client, cfg)
+
+	assetHistory, err := executors.FetchAssetHistory(c)
+	if err != nil {
+		return nil, err
+	}
+
+	markPrices, err := executors.FetchMarkPrices(c)
+	if err != nil {
+		return nil, err
+	}
+
+	transactions, err := builders.BuildTransactions(assetHistory, markPrices)
+	if err != nil {
+		return nil, err
+	}
+	cutoff := helpers.CutoffFromDays(days)
+	if cutoff != nil {
+		filtered := transactions[:0]
+		for _, tx := range transactions {
+			if !tx.Time.Before(*cutoff) {
+				filtered = append(filtered, tx)
+			}
+		}
+		transactions = filtered
+	}
+	return transactions, nil
+}
+
 func GetFundings(client *resty.Client, cfg connector.Config, days int) ([]domain.UserFunding, error) {
 	c := newClient(client, cfg)
 

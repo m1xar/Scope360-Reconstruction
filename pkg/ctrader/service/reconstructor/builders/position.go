@@ -4,7 +4,6 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/google/uuid"
 	connector "github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader"
 	pb "github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader/proto"
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/service/reconstructor/helpers"
@@ -52,7 +51,7 @@ func buildFXPosition(
 	symbols map[int64]string,
 	session *connector.Session,
 ) domain.FXPosition {
-	id := uuid.NewSHA1(uuid.NameSpaceOID, []byte("ctrader-position-"+strconv.FormatInt(positionID, 10)))
+	id := strconv.FormatInt(positionID, 10)
 	opening := openingDeals(deals)
 	closing := closingDeals(deals)
 	first := deals[0]

@@ -286,6 +286,38 @@ func GetCurrentBalance(
 	return &val, nil
 }
 
+func GetTransactions(
+	client *resty.Client,
+	creds okxclient.Credentials,
+	baseURL string,
+	days int,
+) ([]domain.Transaction, error) {
+	okxclient.AttachAuth(client, creds)
+
+	startMs := int64(0)
+	cutoff := helpers.CutoffFromDays(days)
+	if cutoff != nil {
+		startMs = cutoff.UnixMilli()
+	}
+
+	bills, err := executors.FetchAllBills(client, baseURL, "", startMs, "")
+	if err != nil {
+		return nil, err
+	}
+
+	transactions := builders.BuildTransactionsFromBills(bills)
+	if cutoff != nil {
+		filtered := transactions[:0]
+		for _, tx := range transactions {
+			if !tx.Time.Before(*cutoff) {
+				filtered = append(filtered, tx)
+			}
+		}
+		transactions = filtered
+	}
+	return transactions, nil
+}
+
 func GetFundings(
 	client *resty.Client,
 	creds okxclient.Credentials,

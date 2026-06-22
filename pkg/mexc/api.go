@@ -206,6 +206,32 @@ func GetCurrentBalance(
 	return &val, nil
 }
 
+func GetTransactions(
+	client *resty.Client,
+	creds mexcclient.Credentials,
+	days int,
+) ([]domain.Transaction, error) {
+	mexcclient.AttachAuth(client, creds)
+
+	transfers, err := executors.FetchAllTransferRecords(client)
+	if err != nil {
+		return nil, err
+	}
+
+	transactions := builders.BuildTransactions(transfers)
+	cutoff := helpers.CutoffFromDays(days)
+	if cutoff != nil {
+		filtered := transactions[:0]
+		for _, tx := range transactions {
+			if !tx.Time.Before(*cutoff) {
+				filtered = append(filtered, tx)
+			}
+		}
+		transactions = filtered
+	}
+	return transactions, nil
+}
+
 func GetFundings(
 	client *resty.Client,
 	creds mexcclient.Credentials,

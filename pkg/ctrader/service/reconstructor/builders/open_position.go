@@ -3,7 +3,6 @@ package builders
 import (
 	"strconv"
 
-	"github.com/google/uuid"
 	connector "github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader"
 	pb "github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader/proto"
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/service/reconstructor/helpers"
@@ -15,19 +14,19 @@ func BuildOpenPositions(
 	symbols map[int64]string,
 	currentPrices map[int64]float64,
 	session *connector.Session,
-) []domain.OpenPosition {
+) []domain.FXOpenPosition {
 	if res == nil {
-		return []domain.OpenPosition{}
+		return []domain.FXOpenPosition{}
 	}
 	ordersByPosition := make(map[int64][]*pb.ProtoOAOrder)
 	for _, order := range res.GetOrder() {
 		ordersByPosition[order.GetPositionId()] = append(ordersByPosition[order.GetPositionId()], order)
 	}
-	out := make([]domain.OpenPosition, 0, len(res.GetPosition()))
+	out := make([]domain.FXOpenPosition, 0, len(res.GetPosition()))
 	for _, pos := range res.GetPosition() {
 		tradeData := pos.GetTradeData()
-		id := uuid.NewSHA1(uuid.NameSpaceOID, []byte("ctrader-position-"+strconv.FormatInt(pos.GetPositionId(), 10)))
-		out = append(out, domain.OpenPosition{
+		id := strconv.FormatInt(pos.GetPositionId(), 10)
+		out = append(out, domain.FXOpenPosition{
 			ID:           id,
 			Pair:         helpers.SymbolName(symbols, tradeData.GetSymbolId()),
 			Amount:       volumeToAmount(tradeData.GetVolume()),

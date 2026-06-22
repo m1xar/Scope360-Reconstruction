@@ -1,11 +1,12 @@
 package builders
 
 import (
-	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
-	"github.com/m1xar/scope360-reconstruction/pkg/domain"
-	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
 	"strings"
 	"time"
+
+	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
+	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
 )
 
 func BuildUserBalanceSnapshotsFromPortfolio(resp models.PortfolioResponse) []domain.UserBalanceSnapshot {
@@ -14,9 +15,8 @@ func BuildUserBalanceSnapshotsFromPortfolio(resp models.PortfolioResponse) []dom
 
 	for _, point := range history {
 		out = append(out, domain.UserBalanceSnapshot{
-			ResourceID: 0,
-			CreatedAt:  time.UnixMilli(point.Timestamp).UTC(),
-			Balance:    helpers.Round8(helpers.MustFloat(point.Value)),
+			CreatedAt: time.UnixMilli(point.Timestamp).UTC(),
+			Balance:   helpers.Round8(helpers.MustFloat(point.Value)),
 		})
 	}
 

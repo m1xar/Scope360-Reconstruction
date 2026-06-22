@@ -21,15 +21,14 @@ func BuildBalanceSnapshots(positions []domain.FXPosition) []domain.UserBalanceSn
 		return []domain.UserBalanceSnapshot{}
 	}
 	snapshots := make([]domain.UserBalanceSnapshot, 0, len(closed)+1)
-	snapshots = append(snapshots, domain.UserBalanceSnapshot{ResourceID: 0, CreatedAt: closed[0].CreatedAt, Balance: closed[0].BalanceInit})
+	snapshots = append(snapshots, domain.UserBalanceSnapshot{CreatedAt: closed[0].CreatedAt, Balance: closed[0].BalanceInit})
 	for _, pos := range closed {
 		if pos.ClosedAt == nil {
 			continue
 		}
 		snapshots = append(snapshots, domain.UserBalanceSnapshot{
-			ResourceID: uint64(pos.ID.ID()),
-			CreatedAt:  *pos.ClosedAt,
-			Balance:    pos.BalanceInit + pos.NetPnl,
+			CreatedAt: *pos.ClosedAt,
+			Balance:   pos.BalanceInit + pos.NetPnl,
 		})
 	}
 	return snapshots

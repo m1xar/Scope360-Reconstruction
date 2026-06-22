@@ -24,7 +24,7 @@ func BuildSyntheticBalanceSnapshots(
 	var firstTransferIn *time.Time
 
 	for _, tr := range transfers {
-		if !isStableCurrency(tr.Currency) {
+		if !isSuccessfulTransfer(tr) || !isStableCurrency(tr.Currency) {
 			continue
 		}
 		t := helpers.TimeFromMs(tr.CreateTime)
@@ -91,6 +91,10 @@ func clampBalance(balance float64) float64 {
 		return 0
 	}
 	return balance
+}
+
+func isSuccessfulTransfer(tr models.TransferRecord) bool {
+	return strings.EqualFold(strings.TrimSpace(tr.State), "SUCCESS")
 }
 
 func isStableCurrency(currency string) bool {

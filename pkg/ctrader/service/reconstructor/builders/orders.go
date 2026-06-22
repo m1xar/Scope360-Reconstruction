@@ -3,24 +3,23 @@ package builders
 import (
 	"strconv"
 
-	"github.com/google/uuid"
 	connector "github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader"
 	pb "github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader/proto"
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 )
 
-func BuildOrders(orders []*pb.ProtoOAOrder, deals []*pb.ProtoOADeal, positionUUID uuid.UUID, session *connector.Session) []domain.Order {
+func BuildOrders(orders []*pb.ProtoOAOrder, deals []*pb.ProtoOADeal, positionID string, session *connector.Session) []domain.FXOrder {
 	dealByOrderID := make(map[int64]*pb.ProtoOADeal, len(deals))
 	for _, deal := range deals {
 		dealByOrderID[deal.GetOrderId()] = deal
 	}
-	out := make([]domain.Order, 0, len(orders))
+	out := make([]domain.FXOrder, 0, len(orders))
 	for _, order := range orders {
 		tradeData := order.GetTradeData()
 		orderID := order.GetOrderId()
 		deal := dealByOrderID[orderID]
-		id := uuid.NewSHA1(uuid.NameSpaceOID, []byte("ctrader-order-"+strconv.FormatInt(orderID, 10)))
+		id := strconv.FormatInt(orderID, 10)
 		updatedAt := helpers.TimeFromMillis(order.GetUtcLastUpdateTimestamp())
 		if updatedAt.IsZero() && tradeData != nil {
 			updatedAt = helpers.TimeFromMillis(tradeData.GetOpenTimestamp())
@@ -29,22 +28,21 @@ func BuildOrders(orders []*pb.ProtoOAOrder, deals []*pb.ProtoOADeal, positionUUI
 		if avgPrice == 0 {
 			avgPrice = order.GetLimitPrice()
 		}
-		domainOrder := domain.Order{
-			ID:              id,
-			PositionID:      positionUUID,
-			ExchangeOrderID: strconv.FormatInt(orderID, 10),
-			Type:            orderType(order),
-			Status:          filledOrderStatus(order, deal),
-			Side:            ExecutionSide(orderSide(order, deal)),
-			Amount:          volumeToAmount(order.GetTradeData().GetVolume()),
-			AmountFilled:    volumeToAmount(order.GetExecutedVolume()),
-			AveragePrice:    avgPrice,
-			StopPrice:       order.GetStopPrice(),
-			OriginalPrice:   order.GetLimitPrice(),
-			UpdatedAt:       updatedAt,
+		domainOrder := domain.FXOrder{
+			ID:            id,
+			PositionID:    positionID,
+			Type:          orderType(order),
+			Status:        filledOrderStatus(order, deal),
+			Side:          ExecutionSide(orderSide(order, deal)),
+			Amount:        volumeToAmount(order.GetTradeData().GetVolume()),
+			AmountFilled:  volumeToAmount(order.GetExecutedVolume()),
+			AveragePrice:  avgPrice,
+			StopPrice:     order.GetStopPrice(),
+			OriginalPrice: order.GetLimitPrice(),
+			UpdatedAt:     updatedAt,
 		}
 		if deal != nil {
-			domainOrder.Trade = domain.Trade{
+			domainOrder.Trade = domain.FXTrade{
 				OrderID:    id,
 				Side:       ExecutionSide(deal.GetTradeSide()),
 				Price:      deal.GetExecutionPrice(),
@@ -59,24 +57,23 @@ func BuildOrders(orders []*pb.ProtoOAOrder, deals []*pb.ProtoOADeal, positionUUI
 	return out
 }
 
-func BuildOrdersFromDeals(deals []*pb.ProtoOADeal, positionUUID uuid.UUID, session *connector.Session) []domain.Order {
-	out := make([]domain.Order, 0, len(deals))
+func BuildOrdersFromDeals(deals []*pb.ProtoOADeal, positionID string, session *connector.Session) []domain.FXOrder {
+	out := make([]domain.FXOrder, 0, len(deals))
 	for _, deal := range deals {
 		orderID := deal.GetOrderId()
-		id := uuid.NewSHA1(uuid.NameSpaceOID, []byte("ctrader-order-"+strconv.FormatInt(orderID, 10)))
+		id := strconv.FormatInt(orderID, 10)
 		doneAt := helpers.TimeFromMillis(deal.GetExecutionTimestamp())
-		out = append(out, domain.Order{
-			ID:              id,
-			PositionID:      positionUUID,
-			ExchangeOrderID: strconv.FormatInt(orderID, 10),
-			Type:            "MARKET",
-			Status:          "FILLED",
-			Side:            ExecutionSide(deal.GetTradeSide()),
-			Amount:          volumeToAmount(deal.GetVolume()),
-			AmountFilled:    volumeToAmount(deal.GetFilledVolume()),
-			AveragePrice:    deal.GetExecutionPrice(),
-			UpdatedAt:       doneAt,
-			Trade: domain.Trade{
+		out = append(out, domain.FXOrder{
+			ID:           id,
+			PositionID:   positionID,
+			Type:         "MARKET",
+			Status:       "FILLED",
+			Side:         ExecutionSide(deal.GetTradeSide()),
+			Amount:       volumeToAmount(deal.GetVolume()),
+			AmountFilled: volumeToAmount(deal.GetFilledVolume()),
+			AveragePrice: deal.GetExecutionPrice(),
+			UpdatedAt:    doneAt,
+			Trade: domain.FXTrade{
 				OrderID:    id,
 				Side:       ExecutionSide(deal.GetTradeSide()),
 				Price:      deal.GetExecutionPrice(),

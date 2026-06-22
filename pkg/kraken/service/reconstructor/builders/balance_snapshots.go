@@ -54,9 +54,8 @@ func BuildBalanceSnapshots(logs []models.AccountLog) []domain.UserBalanceSnapsho
 		}
 
 		out = append(out, domain.UserBalanceSnapshot{
-			ResourceID: uint64(item.row.ID),
-			CreatedAt:  item.at,
-			Balance:    helpers.Round8(total),
+			CreatedAt: item.at,
+			Balance:   helpers.Round8(total),
 		})
 	}
 

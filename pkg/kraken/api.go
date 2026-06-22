@@ -237,6 +237,32 @@ func GetCurrentBalance(
 	return &val, nil
 }
 
+func GetTransactions(
+	client *resty.Client,
+	creds krakenclient.Credentials,
+	days int,
+) ([]domain.Transaction, error) {
+	client = authClient(client, creds)
+
+	logs, err := executors.FetchAllAccountLog(client, days)
+	if err != nil {
+		return nil, err
+	}
+
+	transactions := builders.BuildTransactions(logs)
+	cutoff := helpers.CutoffFromDays(days)
+	if cutoff != nil {
+		filtered := transactions[:0]
+		for _, tx := range transactions {
+			if !tx.Time.Before(*cutoff) {
+				filtered = append(filtered, tx)
+			}
+		}
+		transactions = filtered
+	}
+	return transactions, nil
+}
+
 func GetFundings(
 	client *resty.Client,
 	creds krakenclient.Credentials,
