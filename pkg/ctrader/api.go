@@ -9,7 +9,6 @@ import (
 	connector "github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader"
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader/executors"
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader/models"
-	pb "github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader/proto"
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
@@ -38,12 +37,12 @@ func GetBuiltPositions(
 	ctx := context.Background()
 	c := newClient(client, cfg)
 
-	deals, orders, symbols, session, err := loadHistory(ctx, c, days)
+	deals, orders, symbols, session, err := helpers.LoadHistory(ctx, c, days)
 	if err != nil {
 		return nil, err
 	}
 	positions := builders.BuildFXPositions(deals, orders, symbols, session)
-	enrichFXMAEMFE(ctx, c, positions, symbols)
+	helpers.EnrichFXMAEMFE(ctx, c, positions, symbols)
 	cutoff := helpers.CutoffFromDays(days)
 	if cutoff != nil {
 		filtered := positions[:0]
@@ -96,7 +95,7 @@ func GetOpenPositions(
 	if err != nil {
 		return nil, err
 	}
-	currentPrices := fetchCurrentPrices(ctx, c, reconcile)
+	currentPrices := helpers.FetchCurrentPrices(ctx, c, reconcile)
 	return builders.BuildOpenPositions(reconcile, symbols, currentPrices, session), nil
 }
 
@@ -142,7 +141,7 @@ func GetAccountInfo(
 	if err != nil {
 		return nil, err
 	}
-	currency, ok := assetNameByID(assets, trader.GetDepositAssetId())
+	currency, ok := helpers.AssetNameByID(assets, trader.GetDepositAssetId())
 	if !ok {
 		return nil, fmt.Errorf("ctrader deposit asset %d not found", trader.GetDepositAssetId())
 	}
@@ -216,91 +215,4 @@ func GetCandles(
 		return nil, err
 	}
 	return helpers.CandlesFromTrendbars(pair, interval, bars), nil
-}
-
-func loadHistory(ctx context.Context, c *connector.Client, days int) ([]*pb.ProtoOADeal, []*pb.ProtoOAOrder, map[int64]string, *connector.Session, error) {
-	session, err := c.EnsureSession(ctx)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	from, to := helpers.HistoryRange(days)
-	deals, err := executors.FetchDeals(ctx, c, from, to)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	orders, err := executors.FetchOrders(ctx, c, from, to)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	symbols, err := executors.FetchSymbolNames(ctx, c)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	return deals, orders, symbols, session, nil
-}
-
-func enrichFXMAEMFE(ctx context.Context, c *connector.Client, positions []domain.FXPosition, symbols map[int64]string) {
-	if len(positions) == 0 {
-		return
-	}
-	idByPair := make(map[string]int64, len(symbols))
-	for id, name := range symbols {
-		idByPair[name] = id
-	}
-	period := pb.ProtoOATrendbarPeriod_M1
-	for i := range positions {
-		pos := &positions[i]
-		if pos.ClosedAt == nil {
-			continue
-		}
-		symbolID, ok := idByPair[pos.Pair]
-		if !ok {
-			continue
-		}
-		bars, err := executors.FetchTrendbars(ctx, c, symbolID, period, pos.CreatedAt, *pos.ClosedAt, 0)
-		if err != nil {
-			continue
-		}
-		candles := helpers.CandlesFromTrendbars(pos.Pair, "M1", bars)
-		high, low := helpers.CandleHighLow(candles)
-		helpers.ApplyFXMAEMFE(pos, high, low)
-	}
-}
-
-func fetchCurrentPrices(ctx context.Context, c *connector.Client, reconcile *pb.ProtoOAReconcileRes) map[int64]float64 {
-	if reconcile == nil {
-		return map[int64]float64{}
-	}
-	symbolIDs := make(map[int64]struct{})
-	for _, pos := range reconcile.GetPosition() {
-		if pos == nil || pos.GetTradeData() == nil {
-			continue
-		}
-		symbolIDs[pos.GetTradeData().GetSymbolId()] = struct{}{}
-	}
-	prices := make(map[int64]float64, len(symbolIDs))
-	for symbolID := range symbolIDs {
-		spot, err := executors.FetchSpot(ctx, c, symbolID)
-		if err != nil || spot == nil {
-			continue
-		}
-		price := helpers.SpotPrice(spot.GetBid())
-		if price == 0 {
-			price = helpers.SpotPrice(spot.GetAsk())
-		}
-		if price != 0 {
-			prices[symbolID] = price
-		}
-	}
-	return prices
-}
-
-func assetNameByID(assets []*pb.ProtoOAAsset, id int64) (string, bool) {
-	for _, asset := range assets {
-		if asset == nil || asset.GetAssetId() != id {
-			continue
-		}
-		return asset.GetName(), true
-	}
-	return "", false
 }
