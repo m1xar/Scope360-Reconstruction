@@ -43,6 +43,7 @@ type Client struct {
 type APIError struct {
 	Code        string
 	Description string
+	RetryAfter  uint64
 }
 
 func (e APIError) Error() string {
@@ -146,7 +147,11 @@ func (c *Client) doOnce(ctx context.Context, payloadType pb.ProtoOAPayloadType, 
 		if unmarshalErr := gproto.Unmarshal(reply.GetPayload(), &apiErr); unmarshalErr != nil {
 			return unmarshalErr
 		}
-		return APIError{Code: apiErr.GetErrorCode(), Description: apiErr.GetDescription()}
+		return APIError{
+			Code:        apiErr.GetErrorCode(),
+			Description: apiErr.GetDescription(),
+			RetryAfter:  apiErr.GetRetryAfter(),
+		}
 	}
 	return gproto.Unmarshal(reply.GetPayload(), res)
 }

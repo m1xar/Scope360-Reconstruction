@@ -2,6 +2,8 @@ package helpers
 
 import "time"
 
+const DefaultHistoryDays = 365
+
 func CutoffFromDays(days int) *time.Time {
 	if days <= 0 {
 		return nil
@@ -19,8 +21,8 @@ func TimeFromMillis(ms int64) time.Time {
 
 func HistoryRange(days int) (time.Time, time.Time) {
 	to := time.Now()
-	if days > 0 {
-		return to.AddDate(0, 0, -days), to
+	if days <= 0 {
+		days = DefaultHistoryDays
 	}
-	return time.Unix(0, 0), to
+	return to.AddDate(0, 0, -days), to
 }
