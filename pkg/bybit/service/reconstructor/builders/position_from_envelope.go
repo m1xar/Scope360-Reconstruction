@@ -7,6 +7,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/bybit/service/reconstructor/envelope"
 	"github.com/m1xar/scope360-reconstruction/pkg/bybit/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/excursion"
 )
 
 func BuildPositionFromEnvelope(env envelope.PositionEnvelope) (domain.Position, error) {
@@ -79,7 +80,9 @@ func BuildPositionFromEnvelope(env envelope.PositionEnvelope) (domain.Position, 
 	}
 
 	position.RR, position.RRPlanned = riskReward(env, entry, net)
-	position.MAE, position.MFE = excursions(env, entry)
+	if env.CandlesLoaded {
+		position.MAE, position.MFE = excursion.Compute(env.Side, entry, env.PeakSize, env.High, env.Low, pnl, net)
+	}
 
 	return position, nil
 }
@@ -112,21 +115,4 @@ func riskReward(env envelope.PositionEnvelope, entry, net float64) (rr, rrPlanne
 		rrPlanned = &rrpVal
 	}
 	return rr, rrPlanned
-}
-
-func excursions(env envelope.PositionEnvelope, entry float64) (mae, mfe *float64) {
-	if env.High == nil || env.Low == nil {
-		return nil, nil
-	}
-
-	amount := env.PeakSize
-	if env.Side == "LONG" {
-		maeVal := helpers.Round8((*env.Low - entry) * amount)
-		mfeVal := helpers.Round8((*env.High - entry) * amount)
-		return &maeVal, &mfeVal
-	}
-
-	maeVal := helpers.Round8((entry - *env.High) * amount)
-	mfeVal := helpers.Round8((entry - *env.Low) * amount)
-	return &maeVal, &mfeVal
 }

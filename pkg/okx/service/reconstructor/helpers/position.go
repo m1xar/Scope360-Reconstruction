@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/models"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/excursion"
 )
 
 func BuildPosition(
@@ -236,10 +237,9 @@ func buildSyntheticOrders(cp models.ClosedPosition, posID uuid.UUID) []domain.Or
 	}
 }
 
+// ApplyMAEMFE sets MAE/MFE from the high/low of the bars inside the position;
+// high/low are nil when no bar lies fully inside it.
 func ApplyMAEMFE(pos *domain.Position, high, low *float64) {
-	if high == nil || low == nil {
-		return
-	}
 	entry := pos.EntryPrice
 	exit := pos.ExitPrice
 
@@ -252,15 +252,5 @@ func ApplyMAEMFE(pos *domain.Position, high, low *float64) {
 		amount = math.Abs(pos.Pnl / priceDelta)
 	}
 
-	if pos.Side == "LONG" {
-		maeVal := Round8((*low - entry) * amount)
-		mfeVal := Round8((*high - entry) * amount)
-		pos.MAE = &maeVal
-		pos.MFE = &mfeVal
-	} else {
-		maeVal := Round8((entry - *high) * amount)
-		mfeVal := Round8((entry - *low) * amount)
-		pos.MAE = &maeVal
-		pos.MFE = &mfeVal
-	}
+	pos.MAE, pos.MFE = excursion.Compute(pos.Side, entry, amount, high, low, pos.Pnl, pos.NetPnl)
 }

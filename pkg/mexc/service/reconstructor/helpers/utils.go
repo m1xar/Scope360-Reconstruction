@@ -7,10 +7,19 @@ import (
 
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/connector/mexc/models"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/excursion"
 )
 
 func Round8(val float64) float64 {
 	return math.Round(val*1e8) / 1e8
+}
+
+// CandleOpenMs returns the candle open time in ms; the kline API reports seconds.
+func CandleOpenMs(c models.Candle) int64 {
+	if c.Time < 1e12 {
+		return c.Time * 1000
+	}
+	return c.Time
 }
 
 func TimeFromMs(ms int64) time.Time {
@@ -107,10 +116,9 @@ func IsStableCurrency(currency string) bool {
 	}
 }
 
+// ApplyMAEMFE sets MAE/MFE from the high/low of the bars inside the position;
+// high/low are nil when no bar lies fully inside it.
 func ApplyMAEMFE(pos *domain.Position, high, low *float64) {
-	if high == nil || low == nil {
-		return
-	}
 	entry := pos.EntryPrice
 	exit := pos.ExitPrice
 
@@ -123,15 +131,5 @@ func ApplyMAEMFE(pos *domain.Position, high, low *float64) {
 		amount = math.Abs(pos.Pnl / priceDelta)
 	}
 
-	if pos.Side == "LONG" {
-		maeVal := Round8((*low - entry) * amount)
-		mfeVal := Round8((*high - entry) * amount)
-		pos.MAE = &maeVal
-		pos.MFE = &mfeVal
-	} else {
-		maeVal := Round8((entry - *high) * amount)
-		mfeVal := Round8((entry - *low) * amount)
-		pos.MAE = &maeVal
-		pos.MFE = &mfeVal
-	}
+	pos.MAE, pos.MFE = excursion.Compute(pos.Side, entry, amount, high, low, pos.Pnl, pos.NetPnl)
 }

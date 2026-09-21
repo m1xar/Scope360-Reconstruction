@@ -95,6 +95,8 @@ func BuildOpenPositionsFromFills(
 			StartMs:  nowMs - candleLookbackMs,
 			EndMs:    nowMs,
 			ReplyCh:  replyCh,
+
+			KeepPartialBars: true,
 		}
 		replies = append(replies, priceReply{coin: coin, replyCh: replyCh})
 	}

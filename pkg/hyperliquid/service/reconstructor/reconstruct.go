@@ -102,6 +102,7 @@ func ReconstructTrades(
 		resp := <-p.replyCh
 		if resp.Err == nil {
 			p.env.High, p.env.Low = helpers.GetHighLowHyperliquid(resp.Candles)
+			p.env.CandlesLoaded = true
 		}
 		out <- p.env
 	}

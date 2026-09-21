@@ -9,6 +9,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader/models"
 	pb "github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader/proto"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/excursion"
 )
 
 const priceScale = 100000.0
@@ -93,8 +94,10 @@ func CandleHighLow(candles []models.Candle) (high, low *float64) {
 	return &h, &l
 }
 
+// ApplyFXMAEMFE sets MAE/MFE from the high/low of the bars inside the position;
+// high/low are nil when no bar lies fully inside it.
 func ApplyFXMAEMFE(pos *domain.FXPosition, high, low *float64) {
-	if pos == nil || high == nil || low == nil {
+	if pos == nil {
 		return
 	}
 	amount := pos.Amount
@@ -105,17 +108,7 @@ func ApplyFXMAEMFE(pos *domain.FXPosition, high, low *float64) {
 	if priceDelta != 0 && pos.Pnl != 0 {
 		amount = math.Abs(pos.Pnl / priceDelta)
 	}
-	if pos.Side == "LONG" {
-		maeVal := Round8(minFloat(0, (*low-pos.EntryPrice)*amount))
-		mfeVal := Round8(maxFloat(0, (*high-pos.EntryPrice)*amount))
-		pos.MAE = &maeVal
-		pos.MFE = &mfeVal
-		return
-	}
-	maeVal := Round8(minFloat(0, (pos.EntryPrice-*high)*amount))
-	mfeVal := Round8(maxFloat(0, (pos.EntryPrice-*low)*amount))
-	pos.MAE = &maeVal
-	pos.MFE = &mfeVal
+	pos.MAE, pos.MFE = excursion.Compute(pos.Side, pos.EntryPrice, amount, high, low, pos.Pnl, pos.NetPnl)
 }
 
 func minFloat(a, b float64) float64 {

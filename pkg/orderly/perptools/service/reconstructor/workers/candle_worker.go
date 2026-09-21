@@ -8,6 +8,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/orderly/perptools/connector/orderly/models"
 	"github.com/m1xar/scope360-reconstruction/pkg/orderly/perptools/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/candlespan"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/excursion"
 )
 
 func StartCandleWorkers(
@@ -38,7 +39,12 @@ func fetchSpan(client *orderly.Client, req helpers.CandleRequest) ([]models.Orde
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, candles...)
+		barMs := excursion.IntervalMs(segment.Interval)
+		for _, c := range candles {
+			if excursion.Inside(c.StartTimestamp, barMs, req.StartMs, req.EndMs) {
+				out = append(out, c)
+			}
+		}
 	}
 	return out, nil
 }

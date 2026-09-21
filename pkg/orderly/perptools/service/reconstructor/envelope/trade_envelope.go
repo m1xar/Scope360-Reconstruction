@@ -13,4 +13,8 @@ type TradeEnvelope struct {
 	TakeProfit *float64
 	Funding    float64
 	FillTypes  map[int]string
+
+	// CandlesLoaded is set when the candle fetch succeeded; High/Low stay nil
+	// if no bar lies fully inside the position.
+	CandlesLoaded bool
 }

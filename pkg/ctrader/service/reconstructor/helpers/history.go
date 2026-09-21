@@ -11,6 +11,7 @@ import (
 	pb "github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader/proto"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/candlespan"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/excursion"
 )
 
 func LoadHistory(ctx context.Context, c *connector.Client, days int) ([]*pb.ProtoOADeal, []*pb.ProtoOAOrder, map[int64]string, *connector.Session, error) {
@@ -131,7 +132,13 @@ func EnrichFXMAEMFE(ctx context.Context, c *connector.Client, positions []domain
 		if err != nil {
 			continue
 		}
-		high, low := CandleHighLow(candles)
+		inside := candles[:0]
+		for _, candle := range candles {
+			if excursion.Inside(candle.OpenTime.UnixMilli(), excursion.IntervalMs(candle.Interval), pos.CreatedAt.UnixMilli(), pos.ClosedAt.UnixMilli()) {
+				inside = append(inside, candle)
+			}
+		}
+		high, low := CandleHighLow(inside)
 		ApplyFXMAEMFE(pos, high, low)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/kraken/connector/kraken/models"
 	"github.com/m1xar/scope360-reconstruction/pkg/kraken/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/candlespan"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/excursion"
 )
 
 func StartCandleWorkers(
@@ -30,7 +31,12 @@ func fetchSpan(client *resty.Client, req helpers.CandleRequest) ([]models.Candle
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, candles...)
+		barMs := excursion.IntervalMs(segment.Interval)
+		for _, c := range candles {
+			if excursion.Inside(c.Time, barMs, req.StartMs, req.EndMs) {
+				out = append(out, c)
+			}
+		}
 	}
 	return out, nil
 }

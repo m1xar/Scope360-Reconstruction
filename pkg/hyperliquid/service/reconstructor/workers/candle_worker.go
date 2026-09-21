@@ -10,6 +10,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/candlespan"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/excursion"
 )
 
 func StartCandleWorkers(
@@ -41,7 +42,12 @@ func fetchSpan(client *resty.Client, endpoint string, req helpers.CandleRequest)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, candles...)
+		barMs := excursion.IntervalMs(segment.Interval)
+		for _, c := range candles {
+			if req.KeepPartialBars || excursion.Inside(c.T0, barMs, req.StartMs, req.EndMs) {
+				out = append(out, c)
+			}
+		}
 	}
 	return out, nil
 }

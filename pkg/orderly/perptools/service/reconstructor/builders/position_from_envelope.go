@@ -10,6 +10,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 	"github.com/m1xar/scope360-reconstruction/pkg/orderly/perptools/service/reconstructor/envelope"
 	"github.com/m1xar/scope360-reconstruction/pkg/orderly/perptools/service/reconstructor/helpers"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/excursion"
 )
 
 func BuildPositionFromEnvelope(env envelope.TradeEnvelope) (domain.Position, error) {
@@ -96,19 +97,8 @@ func BuildPositionFromEnvelope(env envelope.TradeEnvelope) (domain.Position, err
 	side := env.Side
 
 	var mae, mfe *float64
-	if env.High != nil && env.Low != nil {
-		if side == "LONG" {
-			maeVal := helpers.Round8((*env.Low - entry) * amount)
-			mfeVal := helpers.Round8((*env.High - entry) * amount)
-			mae = &maeVal
-			mfe = &mfeVal
-		}
-		if side == "SHORT" {
-			maeVal := helpers.Round8((entry - *env.High) * amount)
-			mfeVal := helpers.Round8((entry - *env.Low) * amount)
-			mae = &maeVal
-			mfe = &mfeVal
-		}
+	if env.CandlesLoaded {
+		mae, mfe = excursion.Compute(side, entry, amount, env.High, env.Low, pnl, net)
 	}
 
 	var rr, rrPlanned *float64

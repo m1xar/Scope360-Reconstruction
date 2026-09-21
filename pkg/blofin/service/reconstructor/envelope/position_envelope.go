@@ -25,4 +25,8 @@ type PositionEnvelope struct {
 	Funding    float64
 	High       *float64
 	Low        *float64
+
+	// CandlesLoaded is set when the candle fetch succeeded; High/Low stay nil
+	// if no bar lies fully inside the position.
+	CandlesLoaded bool
 }

@@ -65,6 +65,7 @@ func ReconstructPositions(
 		resp := <-p.replyCh
 		if resp.Err == nil {
 			p.env.High, p.env.Low = helpers.GetHighLow(resp.Candles)
+			p.env.CandlesLoaded = true
 		}
 		out <- p.env
 	}

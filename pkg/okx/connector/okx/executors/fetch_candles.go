@@ -16,6 +16,10 @@ const candlesPageLimit = 100
 // standardToOkx converts standard (Hyperliquid) interval format to OKX bar format.
 // OKX uses uppercase for hours/days/weeks: "1H","4H","12H","1D","3D","1W","1M".
 func standardToOkx(interval string) string {
+	// Plain "1D" bars open at 16:00 UTC (UTC+8 midnight); candlespan expects UTC days.
+	if interval == "1d" {
+		return "1Dutc"
+	}
 	for _, suffix := range []string{"h", "d", "w"} {
 		if strings.HasSuffix(interval, suffix) {
 			return interval[:len(interval)-1] + strings.ToUpper(suffix)
@@ -37,7 +41,8 @@ func FetchCandles(client *resty.Client, baseURL, instId, bar string, startMs, en
 			"limit":  fmt.Sprintf("%d", candlesPageLimit),
 		}
 		if startMs > 0 {
-			params["before"] = fmt.Sprint(startMs)
+			// before is exclusive: step back 1ms so a bar opening exactly at startMs is returned.
+			params["before"] = fmt.Sprint(startMs - 1)
 		}
 
 		page, err := doWithRateLimit(func() ([]models.Candle, error) {

@@ -6,6 +6,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/models"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/candlespan"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/excursion"
 )
 
 func StartCandleWorkers(
@@ -31,7 +32,12 @@ func fetchSpan(client *resty.Client, baseURL string, req helpers.CandleRequest) 
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, candles...)
+		barMs := excursion.IntervalMs(segment.Interval)
+		for _, c := range candles {
+			if excursion.Inside(helpers.MustInt64(c.Ts), barMs, req.StartMs, req.EndMs) {
+				out = append(out, c)
+			}
+		}
 	}
 	return out, nil
 }
