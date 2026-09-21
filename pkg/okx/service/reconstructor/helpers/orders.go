@@ -27,8 +27,7 @@ func MatchOrdersToPosition(cp models.ClosedPosition, ordersByInst map[string][]m
 
 	matched := make([]models.Order, 0)
 	for _, ord := range instOrders {
-		size := MustFloat(ord.Sz) * MustFloat(instrument.CtVal)
-		ord.Sz = fmt.Sprint(size)
+		ord = OrderInBaseUnits(ord, instrument)
 		ordPosSide := strings.ToLower(ord.PosSide)
 		if ordPosSide != "" && ordPosSide != "net" && targetPosSide != "" && ordPosSide != targetPosSide {
 			continue
@@ -40,6 +39,14 @@ func MatchOrdersToPosition(cp models.ClosedPosition, ordersByInst map[string][]m
 		}
 	}
 	return matched
+}
+
+// OrderInBaseUnits converts the order's contract sizes into base-asset units.
+func OrderInBaseUnits(ord models.Order, instrument models.Instrument) models.Order {
+	ctVal := MustFloat(instrument.CtVal)
+	ord.Sz = fmt.Sprint(MustFloat(ord.Sz) * ctVal)
+	ord.AccFillSz = fmt.Sprint(MustFloat(ord.AccFillSz) * ctVal)
+	return ord
 }
 
 func directionToPosSide(direction string) string {

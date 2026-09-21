@@ -16,6 +16,11 @@ import (
 
 const defaultCandleWorkers = 4
 
+// orders-history-archive filters begin/end by order cTime, and a resting limit
+// order is created before the position it opens, so the fetch window has to
+// start earlier than the position's cTime.
+const openPositionOrdersLookback = 7 * 24 * 60 * 60 * 1000
+
 func ReconstructClosedPositions(
 	client *resty.Client,
 	baseURL string,
@@ -163,7 +168,7 @@ func ReconstructOpenPositions(
 		positions = append(positions, builders.BuildOpenPosition(r, instruments[r.InstId]))
 	}
 
-	enrichOpenPositionOrders(client, baseURL, raw, positions)
+	enrichOpenPositionOrders(client, baseURL, raw, positions, instruments)
 	return positions, nil
 }
 
@@ -172,6 +177,7 @@ func enrichOpenPositionOrders(
 	baseURL string,
 	raw []models.OpenPosition,
 	positions []domain.OpenPosition,
+	instruments map[string]models.Instrument,
 ) {
 	if len(raw) == 0 || len(positions) == 0 {
 		return
@@ -191,7 +197,7 @@ func enrichOpenPositionOrders(
 		return
 	}
 
-	orders, err := executors.FetchAllSwapAndFuturesOrders(client, baseURL, startMs)
+	orders, err := executors.FetchAllSwapAndFuturesOrders(client, baseURL, startMs-openPositionOrdersLookback)
 	if err != nil {
 		return
 	}
@@ -203,6 +209,7 @@ func enrichOpenPositionOrders(
 		r := raw[i]
 		openMs := helpers.MustInt64(r.CTime)
 		posSide := strings.ToLower(strings.TrimSpace(r.PosSide))
+		mgnMode := strings.ToLower(strings.TrimSpace(r.MgnMode))
 		matched := make([]models.Order, 0)
 
 		for _, ord := range orders {
@@ -213,10 +220,14 @@ func enrichOpenPositionOrders(
 			if posSide != "" && posSide != "net" && ordPosSide != "" && ordPosSide != "net" && ordPosSide != posSide {
 				continue
 			}
+			ordTdMode := strings.ToLower(strings.TrimSpace(ord.TdMode))
+			if mgnMode != "" && ordTdMode != "" && ordTdMode != mgnMode {
+				continue
+			}
 			if helpers.MustInt64(ord.UTime) < openMs {
 				continue
 			}
-			matched = append(matched, ord)
+			matched = append(matched, helpers.OrderInBaseUnits(ord, instruments[r.InstId]))
 		}
 
 		positions[i].Orders = helpers.BuildOrders(matched, positions[i].ID)
