@@ -3,6 +3,7 @@ package reconstructor
 import (
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/google/uuid"
@@ -43,11 +44,13 @@ func ReconstructClosedPositions(
 
 	oldestMs -= 10 * 60 * 1000
 
-	allOrders, err := executors.FetchAllSwapAndFuturesOrders(client, baseURL, oldestMs)
+	allOrders, fills, fillsErr, err := fetchOrdersAndFills(client, baseURL, oldestMs, oldestMs)
 	if err != nil {
 		return nil, err
 	}
 	ordersByInst := helpers.GroupOrdersByInst(allOrders)
+	parents := helpers.OrdersByID(allOrders)
+	fillsByInst := helpers.GroupFillsByInst(fills)
 
 	candleRequests := make(chan helpers.CandleRequest, defaultCandleWorkers)
 	workers.StartCandleWorkers(client, baseURL, candleRequests, defaultCandleWorkers)
@@ -76,7 +79,19 @@ func ReconstructClosedPositions(
 	positions := make([]domain.Position, len(closedPositions))
 
 	for i, cp := range closedPositions {
-		posOrders := helpers.MatchOrdersToPosition(cp, ordersByInst, instruments[cp.InstId])
+		var posOrders []models.Order
+		if fillsErr == nil {
+			posOrders = helpers.OrdersFromFills(fillsByInst[cp.InstId], parents, helpers.PositionScope{
+				InstId:  cp.InstId,
+				PosSide: cp.Direction,
+				MgnMode: cp.MgnMode,
+				FromMs:  helpers.MustInt64(cp.CTime),
+				ToMs:    helpers.MustInt64(cp.UTime),
+			}, instruments[cp.InstId])
+		}
+		if len(posOrders) == 0 {
+			posOrders = helpers.MatchOrdersToPosition(cp, ordersByInst, instruments[cp.InstId])
+		}
 		pos, err := helpers.BuildPosition(cp, posOrders, instruments[cp.InstId])
 		if err != nil {
 			continue
@@ -197,10 +212,12 @@ func enrichOpenPositionOrders(
 		return
 	}
 
-	orders, err := executors.FetchAllSwapAndFuturesOrders(client, baseURL, startMs-openPositionOrdersLookback)
+	orders, fills, fillsErr, err := fetchOrdersAndFills(client, baseURL, startMs-openPositionOrdersLookback, startMs)
 	if err != nil {
 		return
 	}
+	parents := helpers.OrdersByID(orders)
+	fillsByInst := helpers.GroupFillsByInst(fills)
 
 	for i := range positions {
 		if i >= len(raw) {
@@ -208,6 +225,18 @@ func enrichOpenPositionOrders(
 		}
 		r := raw[i]
 		openMs := helpers.MustInt64(r.CTime)
+		if fillsErr == nil {
+			fromFills := helpers.OrdersFromFills(fillsByInst[r.InstId], parents, helpers.PositionScope{
+				InstId:  r.InstId,
+				PosSide: r.PosSide,
+				MgnMode: r.MgnMode,
+				FromMs:  openMs,
+			}, instruments[r.InstId])
+			if len(fromFills) > 0 {
+				positions[i].Orders = helpers.BuildOrders(fromFills, positions[i].ID)
+				continue
+			}
+		}
 		posSide := strings.ToLower(strings.TrimSpace(r.PosSide))
 		mgnMode := strings.ToLower(strings.TrimSpace(r.MgnMode))
 		matched := make([]models.Order, 0)
@@ -232,4 +261,27 @@ func enrichOpenPositionOrders(
 
 		positions[i].Orders = helpers.BuildOrders(matched, positions[i].ID)
 	}
+}
+
+// fetchOrdersAndFills loads order history (by order cTime, from ordersFromMs)
+// and fill history (by fill ts, from fillsFromMs) in parallel. Orders are
+// required; a fills failure is returned separately so callers can fall back
+// to whole-order matching.
+func fetchOrdersAndFills(
+	client *resty.Client,
+	baseURL string,
+	ordersFromMs, fillsFromMs int64,
+) (orders []models.Order, fills []models.Fill, fillsErr, err error) {
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		orders, err = executors.FetchAllSwapAndFuturesOrders(client, baseURL, ordersFromMs)
+	}()
+	go func() {
+		defer wg.Done()
+		fills, fillsErr = executors.FetchAllSwapAndFuturesFills(client, baseURL, fillsFromMs)
+	}()
+	wg.Wait()
+	return orders, fills, fillsErr, err
 }
