@@ -60,7 +60,7 @@ func BuildPositionFromEnvelope(env envelope.PositionEnvelope) (domain.Position, 
 		ID:               posID,
 		Side:             env.Side,
 		Pair:             helpers.NormalizePair(env.Symbol),
-		Amount:           helpers.Round8(env.PeakSize),
+		Amount:           helpers.Round8(openSize),
 		EntryPrice:       helpers.Round8(entry),
 		ExitPrice:        helpers.Round8(exit),
 		Pnl:              helpers.Round8(pnl),
@@ -79,9 +79,9 @@ func BuildPositionFromEnvelope(env envelope.PositionEnvelope) (domain.Position, 
 		Orders:           orders,
 	}
 
-	position.RR, position.RRPlanned = riskReward(env, entry, net)
+	position.RR, position.RRPlanned = riskReward(env, entry, openSize, net)
 	if env.CandlesLoaded {
-		position.MAE, position.MFE = excursion.Compute(env.Side, entry, env.PeakSize, env.High, env.Low, pnl, net)
+		position.MAE, position.MFE = excursion.Compute(env.Side, entry, openSize, env.High, env.Low, pnl, net)
 	}
 
 	return position, nil
@@ -97,12 +97,12 @@ func liquidationPrice(env envelope.PositionEnvelope, entry float64) float64 {
 	return helpers.Round8(entry * (1 + 1/env.Leverage))
 }
 
-func riskReward(env envelope.PositionEnvelope, entry, net float64) (rr, rrPlanned *float64) {
+func riskReward(env envelope.PositionEnvelope, entry, size, net float64) (rr, rrPlanned *float64) {
 	if env.StopLoss == nil {
 		return nil, nil
 	}
 
-	slDist := math.Abs(*env.StopLoss-entry) * env.PeakSize
+	slDist := math.Abs(*env.StopLoss-entry) * size
 	if slDist == 0 {
 		return nil, nil
 	}

@@ -2,6 +2,7 @@ package helpers
 
 import (
 	"math"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
@@ -21,7 +22,7 @@ func BuildPosition(
 
 	entry := MustFloat(cp.OpenAvgPx)
 	exit := MustFloat(cp.CloseAvgPx)
-	amount := MustFloat(cp.OpenMaxPos) * MustFloat(instrument.CtVal)
+	amount := openedAmount(cp, orders, instrument)
 	pnl := MustFloat(cp.Pnl)
 	funding := MustFloat(cp.FundingFee)
 	net := MustFloat(cp.RealizedPnl)
@@ -80,7 +81,7 @@ func BuildPosition(
 		domainOrders = BuildOrders(orders, posID)
 	}
 	if len(domainOrders) == 0 {
-		domainOrders = buildSyntheticOrders(cp, posID)
+		domainOrders = buildSyntheticOrders(cp, amount, posID)
 	}
 
 	if len(domainOrders) > 0 {
@@ -170,10 +171,28 @@ func BuildOrders(orders []models.Order, posID uuid.UUID) []domain.Order {
 	return result
 }
 
-func buildSyntheticOrders(cp models.ClosedPosition, posID uuid.UUID) []domain.Order {
+// openedAmount is the total size of the position's opening orders (in base
+// units), so it matches the orders it is built from; openMaxPos is only the
+// peak exposure. The peak is kept as a floor in case orders are missing.
+func openedAmount(cp models.ClosedPosition, orders []models.Order, instrument models.Instrument) float64 {
+	peak := MustFloat(cp.OpenMaxPos) * MustFloat(instrument.CtVal)
+	openSide := "buy"
+	if SideFromDirection(cp.Direction) == "SHORT" {
+		openSide = "sell"
+	}
+
+	var opened float64
+	for _, ord := range orders {
+		if strings.ToLower(ord.Side) == openSide {
+			opened += MustFloat(ord.AccFillSz)
+		}
+	}
+	return math.Max(opened, peak)
+}
+
+func buildSyntheticOrders(cp models.ClosedPosition, amount float64, posID uuid.UUID) []domain.Order {
 	entry := MustFloat(cp.OpenAvgPx)
 	exit := MustFloat(cp.CloseAvgPx)
-	amount := MustFloat(cp.OpenMaxPos)
 	fee := math.Abs(MustFloat(cp.Fee))
 	pnl := MustFloat(cp.RealizedPnl)
 	openTime := TimeFromMs(cp.CTime)

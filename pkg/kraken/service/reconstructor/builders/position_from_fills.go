@@ -200,9 +200,9 @@ func buildPosition(ep episode, pairBySymbol map[string]string) (domain.Position,
 	}
 
 	side := helpers.PositionSideFromSign(ep.OpenSign)
-	pnl := (exit - entry) * ep.PeakSize
+	pnl := (exit - entry) * closeSize
 	if side == "SHORT" {
-		pnl = (entry - exit) * ep.PeakSize
+		pnl = (entry - exit) * closeSize
 	}
 	status := "lose"
 	if pnl > 0 {
@@ -214,7 +214,7 @@ func buildPosition(ep episode, pairBySymbol map[string]string) (domain.Position,
 		ID:         posID,
 		Side:       side,
 		Pair:       helpers.NormalizePair(ep.Symbol, pairBySymbol),
-		Amount:     helpers.Round8(ep.PeakSize),
+		Amount:     helpers.Round8(openSize),
 		EntryPrice: helpers.Round8(entry),
 		ExitPrice:  helpers.Round8(exit),
 		Pnl:        helpers.Round8(pnl),
