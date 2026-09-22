@@ -14,8 +14,6 @@ import (
 
 const defaultCandleWorkers = 4
 
-// ReconstructClosedPositions builds the positions closed after the cutoff
-// (the whole retention when cutoff is nil).
 func ReconstructClosedPositions(client *resty.Client, cutoff *time.Time) ([]domain.Position, error) {
 	d, err := Load(client, cutoff, scope.Closed)
 	if err != nil {
@@ -92,8 +90,6 @@ func FetchStableEquity(client *resty.Client) (float64, error) {
 	return helpers.Round8(asset.Equity), nil
 }
 
-// enrichOpenPositionOrders attaches each open position's orders, matched
-// by the exchange's position id.
 func enrichOpenPositionOrders(
 	orders []models.Order,
 	raw []models.OpenPosition,

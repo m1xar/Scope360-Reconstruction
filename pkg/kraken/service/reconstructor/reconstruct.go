@@ -41,9 +41,6 @@ func (w FillWalk) EarliestOpen() time.Time {
 	return earliest
 }
 
-// collectClosedEpisodes walks the fills newest first, seeded with the open
-// positions, until the cutoff is passed and no episode is left half walked
-// (or the lookback floor is hit when cutoff is nil).
 func collectClosedEpisodes(
 	client *resty.Client,
 	openPositions []models.OpenPosition,
@@ -320,8 +317,6 @@ func collectOpenFills(client *resty.Client, openPositions []models.OpenPosition)
 	return segmenter.OpenFills(), nil
 }
 
-// ReconstructClosedPositions builds the positions closed after the cutoff
-// (the whole lookback when cutoff is nil).
 func ReconstructClosedPositions(
 	client *resty.Client,
 	cutoff *time.Time,

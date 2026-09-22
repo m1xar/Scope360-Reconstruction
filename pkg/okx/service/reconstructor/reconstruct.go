@@ -22,8 +22,6 @@ const defaultCandleWorkers = 4
 // start earlier than the position's cTime.
 const openPositionOrdersLookback = 7 * 24 * 60 * 60 * 1000
 
-// ReconstructClosedPositions builds the positions closed in the last days
-// (all of the archive when days <= 0).
 func ReconstructClosedPositions(
 	client *resty.Client,
 	baseURL string,
@@ -36,9 +34,6 @@ func ReconstructClosedPositions(
 	return d.ClosedPositions()
 }
 
-// buildClosedPositions matches orders to every closed position, builds it
-// and fills in MAE/MFE from candles; positions that cannot be built are
-// dropped. The result is sorted by close time.
 func buildClosedPositions(
 	client *resty.Client,
 	baseURL string,
@@ -130,8 +125,6 @@ func closedPositionsAfter(positions []models.ClosedPosition, sinceMs int64) []mo
 	return kept
 }
 
-// ReconstructOpenPositions builds the open positions with their opening
-// orders.
 func ReconstructOpenPositions(
 	client *resty.Client,
 	baseURL string,
@@ -143,9 +136,6 @@ func ReconstructOpenPositions(
 	return d.OpenPositions()
 }
 
-// enrichOpenPositionOrders attaches the opening orders to every open
-// position: from fills when they loaded, otherwise from whole orders placed
-// after the position opened.
 func enrichOpenPositionOrders(
 	orders []models.Order,
 	fills []models.Fill,

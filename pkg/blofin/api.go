@@ -34,10 +34,6 @@ func load(client *resty.Client, creds blofinclient.Credentials, days int, s scop
 	return reconstructor.Load(client, blofinclient.BaseURL, helpers.CutoffFromDays(days), s)
 }
 
-// Sync fetches the account's raw data once and builds every model from it:
-// closed and open positions, balance snapshots, the current balance,
-// transactions and fundings for the last days (the whole lookback when
-// days <= 0).
 func Sync(
 	client *resty.Client,
 	creds blofinclient.Credentials,

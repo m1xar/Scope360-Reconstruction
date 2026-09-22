@@ -156,9 +156,6 @@ func CollectWeeks(
 			walk.Fills = append(walk.Fills, fills...)
 			walk.Groups = append(walk.Groups, segmenter.PushOlderBatch(fills)...)
 
-			// With a cutoff the walk has to pass it and leave no episode half
-			// walked; with untilResolved it also has to reach the opening
-			// fill of every open position.
 			settled := segmenter.Flat()
 			if untilResolved {
 				settled = segmenter.Resolved()
@@ -296,8 +293,6 @@ func buildEnvelope(
 	}
 }
 
-// ReconstructClosedPositions builds the positions closed after the cutoff
-// (the whole retention when cutoff is nil).
 func ReconstructClosedPositions(
 	client *resty.Client,
 	cutoff *time.Time,
@@ -309,8 +304,6 @@ func ReconstructClosedPositions(
 	return d.ClosedPositions()
 }
 
-// ReconstructOpenPositions builds the open positions with their opening
-// orders.
 func ReconstructOpenPositions(client *resty.Client) ([]domain.OpenPosition, error) {
 	d, err := Load(client, nil, scope.Open)
 	if err != nil {

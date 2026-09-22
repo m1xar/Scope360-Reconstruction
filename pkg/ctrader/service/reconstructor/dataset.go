@@ -17,9 +17,6 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/scope"
 )
 
-// Dataset is every raw cTrader response the builders need, fetched once by
-// Load for the requested scope. The client multiplexes one stream, so the
-// raw data is loaded sequentially; the builders can still run in parallel.
 type Dataset struct {
 	ctx    context.Context
 	client *connector.Client
@@ -45,9 +42,6 @@ type Dataset struct {
 	closed     []domain.FXPosition
 }
 
-// Load fetches the datasets the scope needs, once each. Balance snapshots
-// are built from the closed positions, so Balances implies loading the
-// history; Balances also carries the account info.
 func Load(ctx context.Context, client *connector.Client, days int, s scope.Scope) (*Dataset, error) {
 	d := &Dataset{ctx: ctx, client: client, days: days, cutoff: helpers.CutoffFromDays(days), scope: s}
 
@@ -101,9 +95,6 @@ func Load(ctx context.Context, client *connector.Client, days int, s scope.Scope
 	return d, nil
 }
 
-// ClosedPositions builds the positions closed inside the window, with
-// MAE/MFE from trendbars when closed positions are in scope (balance
-// snapshots alone do not need them).
 func (d *Dataset) ClosedPositions() []domain.FXPosition {
 	d.closedOnce.Do(func() {
 		positions := builders.BuildFXPositions(d.deals, d.orders, d.symbols, d.session)
@@ -124,13 +115,10 @@ func (d *Dataset) ClosedPositions() []domain.FXPosition {
 	return d.closed
 }
 
-// OpenPositions builds the open positions with their current prices.
 func (d *Dataset) OpenPositions() []domain.FXOpenPosition {
 	return builders.BuildOpenPositions(d.reconcile, d.symbols, d.prices, d.session)
 }
 
-// BalanceSnapshots returns the balance after every closed position inside
-// the window, oldest first.
 func (d *Dataset) BalanceSnapshots() []domain.UserBalanceSnapshot {
 	snapshots := builders.BuildBalanceSnapshots(d.ClosedPositions())
 	if d.cutoff != nil {
@@ -146,7 +134,6 @@ func (d *Dataset) BalanceSnapshots() []domain.UserBalanceSnapshot {
 	return snapshots
 }
 
-// AccountInfo is the trader's balance, leverage and deposit currency.
 func (d *Dataset) AccountInfo() (*domain.FXAccountInfo, error) {
 	if d.trader == nil {
 		return nil, nil
@@ -162,7 +149,6 @@ func (d *Dataset) AccountInfo() (*domain.FXAccountInfo, error) {
 	}, nil
 }
 
-// Transactions are the deposits and withdrawals inside the window.
 func (d *Dataset) Transactions() []domain.Transaction {
 	transactions := builders.BuildTransactions(d.cashFlow)
 	if d.cutoff == nil {

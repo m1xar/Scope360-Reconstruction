@@ -15,29 +15,23 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
-// Dataset is every raw OKX response the builders need, fetched once by Load
-// for the requested scope. Each builder is pure apart from the candles that
-// closed positions pull for MAE/MFE.
 type Dataset struct {
-	client  *resty.Client
-	baseURL string
-	cutoff  *time.Time
-	scope   scope.Scope
-	// windowMs is where balances, transactions and fundings start: the
-	// cutoff, or the bill archive's default depth without one. Bills for
-	// BalanceInit may reach further back.
+	client   *resty.Client
+	baseURL  string
+	cutoff   *time.Time
+	scope    scope.Scope
 	windowMs int64
 
-	closed      []models.ClosedPosition // closed inside the window
+	closed      []models.ClosedPosition
 	open        []models.OpenPosition
 	instruments map[string]models.Instrument
 
 	orders   []models.Order
 	fills    []models.Fill
-	fillsErr error // fills are optional: whole-order matching is the fallback
+	fillsErr error
 	ordersOK bool
 
-	bills   []models.Bill // every instType the scope needs, unfiltered by type
+	bills   []models.Bill
 	billsOK bool
 	balance models.Balance
 	balOK   bool
@@ -46,10 +40,6 @@ type Dataset struct {
 	snapshots []domain.UserBalanceSnapshot
 }
 
-// Load fetches the datasets the scope needs, once each. Ranges are widened to
-// the union of what the requested consumers would fetch on their own: orders,
-// fills and bills start at the earliest of the oldest closed position, the
-// oldest open position (minus the order lookback) and the cutoff.
 func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope) (*Dataset, error) {
 	d := &Dataset{client: client, baseURL: baseURL, cutoff: cutoff, scope: s}
 	cutoffMs := window.StartMs(cutoff)
@@ -58,7 +48,6 @@ func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope
 		d.windowMs = executors.BillsDefaultStartMs()
 	}
 
-	// Phase 1: position lists and the balance are independent.
 	var balErr error
 	err := parallel.Run(
 		when(s.Has(scope.Closed), func() error {
@@ -80,7 +69,6 @@ func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope
 		when(s.Any(scope.Closed|scope.Balances), func() error {
 			bal, err := executors.FetchBalance(client, baseURL)
 			if err != nil {
-				// Closed positions only lose BalanceInit without a balance.
 				balErr = err
 				return nil
 			}
@@ -95,7 +83,6 @@ func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope
 		return nil, balErr
 	}
 
-	// Phase 2: everything keyed by the positions found above.
 	ordersFrom, fillsFrom := d.orderRanges()
 	billsFrom, billsWanted := d.billsRange()
 	identifiers := d.identifiers()
@@ -105,7 +92,6 @@ func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope
 		when(fillsFrom > 0, func() error {
 			orders, fills, fillsErr, err := fetchOrdersAndFills(client, baseURL, ordersFrom, fillsFrom)
 			if err != nil {
-				// Open positions tolerate missing orders; closed ones need them.
 				ordersErr = err
 				return nil
 			}
@@ -118,7 +104,7 @@ func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope
 				if s.Any(scope.Balances | scope.Transactions | scope.Fundings) {
 					return err
 				}
-				return nil // closed positions only lose BalanceInit
+				return nil
 			}
 			d.bills, d.billsOK = bills, true
 			return nil
@@ -148,8 +134,6 @@ func when(cond bool, fn func() error) func() error {
 	return fn
 }
 
-// orderRanges returns the start of the order and fill history the scope
-// needs, or zeros when no position asks for any.
 func (d *Dataset) orderRanges() (ordersFrom, fillsFrom int64) {
 	set := func(o, f int64) {
 		if ordersFrom == 0 || o < ordersFrom {
@@ -160,9 +144,6 @@ func (d *Dataset) orderRanges() (ordersFrom, fillsFrom int64) {
 		}
 	}
 	if d.scope.Has(scope.Closed) && len(d.closed) > 0 {
-		// Everything for closed positions is fetched from the open time of
-		// the oldest surviving position, not from the cutoff: a position
-		// closed inside the window may have been opened long before it.
 		oldest := oldestClosedMs(d.closed) - 10*60*1000
 		set(oldest, oldest)
 	}
@@ -174,9 +155,6 @@ func (d *Dataset) orderRanges() (ordersFrom, fillsFrom int64) {
 	return ordersFrom, fillsFrom
 }
 
-// billsRange returns where the bill history has to start for the scope: the
-// oldest closed position for BalanceInit, the cutoff (or the archive's
-// default depth) for snapshots, transactions and fundings.
 func (d *Dataset) billsRange() (int64, bool) {
 	from, wanted := int64(0), false
 	if d.scope.Any(scope.Balances | scope.Transactions | scope.Fundings) {
@@ -192,9 +170,6 @@ func (d *Dataset) billsRange() (int64, bool) {
 	return from, wanted
 }
 
-// fetchBills loads the widest bill set any consumer in scope needs:
-// transactions look at every instType, the others at SWAP and FUTURES only;
-// a fundings-only scope keeps the server-side type filter.
 func (d *Dataset) fetchBills(from int64) ([]models.Bill, error) {
 	billType := ""
 	if !d.scope.Any(scope.Closed | scope.Balances | scope.Transactions) {
@@ -245,8 +220,6 @@ func oldestOpenMs(open []models.OpenPosition) int64 {
 	return start
 }
 
-// swapFuturesBills narrows the loaded bills to the derivatives accounts the
-// balance snapshots and fundings are built from.
 func (d *Dataset) swapFuturesBills() []models.Bill {
 	out := make([]models.Bill, 0, len(d.bills))
 	for _, b := range d.bills {
@@ -257,8 +230,6 @@ func (d *Dataset) swapFuturesBills() []models.Bill {
 	return out
 }
 
-// allSnapshots builds the balance snapshots over the whole loaded bill
-// range once; BalanceInit needs the ones before the cutoff too.
 func (d *Dataset) allSnapshots() []domain.UserBalanceSnapshot {
 	d.snapOnce.Do(func() {
 		if !d.balOK || !d.billsOK {
@@ -273,8 +244,6 @@ func (d *Dataset) allSnapshots() []domain.UserBalanceSnapshot {
 	return d.snapshots
 }
 
-// ClosedPositions builds the positions closed inside the window, with
-// MAE/MFE from candles and BalanceInit from the bill history.
 func (d *Dataset) ClosedPositions() ([]domain.Position, error) {
 	if len(d.closed) == 0 {
 		return []domain.Position{}, nil
@@ -284,7 +253,6 @@ func (d *Dataset) ClosedPositions() ([]domain.Position, error) {
 	return positions, nil
 }
 
-// OpenPositions builds the open positions with their opening orders.
 func (d *Dataset) OpenPositions() ([]domain.OpenPosition, error) {
 	positions := make([]domain.OpenPosition, 0, len(d.open))
 	for _, r := range d.open {
@@ -296,8 +264,6 @@ func (d *Dataset) OpenPositions() ([]domain.OpenPosition, error) {
 	return positions, nil
 }
 
-// BalanceSnapshots returns the USD balance after every derivatives bill in
-// the window plus the current balance.
 func (d *Dataset) BalanceSnapshots() []domain.UserBalanceSnapshot {
 	snapshots := d.allSnapshots()
 	out := make([]domain.UserBalanceSnapshot, 0, len(snapshots))
@@ -309,13 +275,10 @@ func (d *Dataset) BalanceSnapshots() []domain.UserBalanceSnapshot {
 	return out
 }
 
-// CurrentBalance is the account's total equity.
 func (d *Dataset) CurrentBalance() float64 {
 	return helpers.MustFloat(d.balance.TotalEq)
 }
 
-// Transactions are the transfers between the funding and trading accounts
-// inside the window.
 func (d *Dataset) Transactions() []domain.Transaction {
 	transactions := builders.BuildTransactionsFromBills(d.bills)
 	out := make([]domain.Transaction, 0, len(transactions))
@@ -327,7 +290,6 @@ func (d *Dataset) Transactions() []domain.Transaction {
 	return out
 }
 
-// Fundings are the non-zero funding-fee bills inside the window.
 func (d *Dataset) Fundings() []domain.UserFunding {
 	fundings := make([]domain.UserFunding, 0)
 	for _, b := range d.swapFuturesBills() {

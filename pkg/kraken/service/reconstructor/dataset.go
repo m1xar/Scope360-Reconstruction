@@ -15,23 +15,18 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/scope"
 )
 
-// Dataset is every raw Kraken Futures response the builders need, fetched
-// once by Load for the requested scope.
 type Dataset struct {
 	client *resty.Client
 	cutoff *time.Time
 	scope  scope.Scope
 
 	open    []models.OpenPosition
-	tickers map[string]models.Ticker // by upper-case symbol
+	tickers map[string]models.Ticker
 
 	walk           FillWalk
-	groups         [][]models.Fill // closed episodes ending after the cutoff
+	groups         [][]models.Fill
 	positionEvents []models.PositionEventElement
 
-	// logs is the account log from the earliest of the oldest surviving
-	// position's open and the cutoff; it feeds BalanceInit, balance
-	// snapshots, transactions and fundings.
 	logs   []models.AccountLog
 	logsOK bool
 
@@ -41,9 +36,6 @@ type Dataset struct {
 	pairBySymbol map[string]string
 }
 
-// Load fetches the datasets the scope needs, once each: the ticker list
-// replaces the per-symbol ticker lookups, and one account-log fetch covers
-// every consumer.
 func Load(client *resty.Client, cutoff *time.Time, s scope.Scope) (*Dataset, error) {
 	d := &Dataset{client: client, cutoff: cutoff, scope: s}
 
@@ -68,7 +60,7 @@ func Load(client *resty.Client, cutoff *time.Time, s scope.Scope) (*Dataset, err
 				if s.Has(scope.Open) {
 					return err
 				}
-				return nil // pairs fall back to per-symbol lookups
+				return nil
 			}
 			d.tickers = make(map[string]models.Ticker, len(tickers))
 			for _, ticker := range tickers {
@@ -79,7 +71,7 @@ func Load(client *resty.Client, cutoff *time.Time, s scope.Scope) (*Dataset, err
 		when(s.Has(scope.Balances), func() error {
 			accounts, err := executors.FetchAccounts(client)
 			if err != nil {
-				return nil // the last balance snapshot is the fallback
+				return nil
 			}
 			d.accounts, d.accountsOK = accounts, true
 			return nil
@@ -100,8 +92,6 @@ func Load(client *resty.Client, cutoff *time.Time, s scope.Scope) (*Dataset, err
 		d.walk = walk
 		d.groups = GroupsClosedAfter(walk.Groups, cutoff)
 
-		// The log starts at the earliest of the cutoff and the oldest
-		// surviving position's open (a zero since is the whole history).
 		since := logSince
 		if len(d.groups) > 0 {
 			earliest := walk.EarliestOpen()
@@ -119,8 +109,6 @@ func Load(client *resty.Client, cutoff *time.Time, s scope.Scope) (*Dataset, err
 				return nil
 			}),
 			when(len(d.groups) > 0 || logWanted, func() error {
-				// BalanceInit is optional; balances, transactions and
-				// fundings are not.
 				if err := d.loadLogs(since); err != nil && logWanted {
 					return err
 				}
@@ -152,9 +140,6 @@ func (d *Dataset) loadLogs(since time.Time) error {
 	return nil
 }
 
-// buildPairMap maps every symbol the builders will see to its pair: from
-// the ticker list first, then per-symbol lookups for anything missing
-// (delisted instruments).
 func (d *Dataset) buildPairMap() map[string]string {
 	symbols := helpers.SymbolsFromFillsAndEvents(d.walk.Fills, d.positionEvents)
 	if d.scope.Has(scope.Fundings) {
@@ -182,9 +167,6 @@ func (d *Dataset) buildPairMap() map[string]string {
 	return out
 }
 
-// ClosedPositions builds the positions closed inside the window from the
-// fill episodes and position events, with MAE/MFE from candles and
-// BalanceInit from the account log.
 func (d *Dataset) ClosedPositions() ([]domain.Position, error) {
 	if len(d.groups) == 0 {
 		return []domain.Position{}, nil
@@ -214,8 +196,6 @@ func (d *Dataset) ClosedPositions() ([]domain.Position, error) {
 	return positions, nil
 }
 
-// OpenPositions builds the open positions with their opening orders (from
-// position events, walked per symbol).
 func (d *Dataset) OpenPositions() ([]domain.OpenPosition, error) {
 	out := make([]domain.OpenPosition, 0, len(d.open))
 	for _, pos := range d.open {
@@ -228,8 +208,6 @@ func (d *Dataset) OpenPositions() ([]domain.OpenPosition, error) {
 	return out, nil
 }
 
-// BalanceSnapshots returns the account balance after every log row inside
-// the window, oldest first.
 func (d *Dataset) BalanceSnapshots() []domain.UserBalanceSnapshot {
 	snapshots := builders.BuildBalanceSnapshots(d.logs)
 	if d.cutoff != nil {
@@ -247,8 +225,6 @@ func (d *Dataset) BalanceSnapshots() []domain.UserBalanceSnapshot {
 	return snapshots
 }
 
-// CurrentBalance is the futures account's balance, or the latest balance
-// snapshot when the accounts endpoint gave nothing usable.
 func (d *Dataset) CurrentBalance() float64 {
 	if d.accountsOK {
 		if val, ok := helpers.CurrentBalanceFromAccounts(d.accounts); ok {
@@ -265,7 +241,6 @@ func (d *Dataset) CurrentBalance() float64 {
 	return snapshots[len(snapshots)-1].Balance
 }
 
-// Transactions are the futures-wallet transfers inside the window.
 func (d *Dataset) Transactions() []domain.Transaction {
 	transactions := builders.BuildTransactions(d.logs)
 	if d.cutoff == nil {
@@ -280,7 +255,6 @@ func (d *Dataset) Transactions() []domain.Transaction {
 	return filtered
 }
 
-// Fundings are the funding payments inside the window.
 func (d *Dataset) Fundings() []domain.UserFunding {
 	fundings := builders.BuildFundings(d.logs, d.pairBySymbol)
 	if d.cutoff == nil {

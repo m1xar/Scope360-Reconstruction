@@ -30,11 +30,6 @@ func load(client *resty.Client, endpoint, user string, days int, s scope.Scope) 
 	return reconstructor.Load(client, endpoint, user, helpers.CutoffFromDays(days), s)
 }
 
-// Sync fetches the account's raw data once and builds every model from it:
-// closed and open positions, balance snapshots, the current balance,
-// transactions and fundings for the last days (the whole history when
-// days <= 0). Open positions need the whole fill history, so Sync loads it
-// once and serves the closed positions from it too.
 func Sync(
 	client *resty.Client,
 	endpoint string,
@@ -254,7 +249,7 @@ func GetOpenPositions(
 	user string,
 	days int,
 ) ([]domain.OpenPosition, error) {
-	_ = days // open positions need the whole fill history
+	_ = days
 
 	d, err := load(client, endpoint, user, 0, scope.Open)
 	if err != nil {

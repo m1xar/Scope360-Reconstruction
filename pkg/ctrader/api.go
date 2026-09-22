@@ -35,9 +35,6 @@ func load(client *connector.Client, cfg connector.Config, days int, s scope.Scop
 	return reconstructor.Load(context.Background(), newClient(client, cfg), days, s)
 }
 
-// Sync fetches the account's raw data once and builds every model from it:
-// closed and open positions, balance snapshots, the account info and
-// transactions for the last days (a year when days <= 0).
 func Sync(
 	client *connector.Client,
 	cfg connector.Config,
@@ -119,8 +116,6 @@ func GetBalanceSnapshots(
 	cfg connector.Config,
 	days int,
 ) ([]domain.UserBalanceSnapshot, error) {
-	// BalanceInit is absolute per position (from the deal's balance), so
-	// only positions closed inside the window are needed, and no candles.
 	d, err := load(client, cfg, days, scope.Balances)
 	if err != nil {
 		return nil, err

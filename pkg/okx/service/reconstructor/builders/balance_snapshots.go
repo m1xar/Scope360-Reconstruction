@@ -14,9 +14,6 @@ func BuildBalanceSnapshotsFromBills(
 	currentBalance float64,
 	bills []models.Bill,
 ) []domain.UserBalanceSnapshot {
-	// Several bills can share a millisecond; the balance after the last of
-	// them (the highest bill id) is the one to keep, whatever order the
-	// archive returned them in.
 	ordered := make([]models.Bill, len(bills))
 	copy(ordered, bills)
 	sort.SliceStable(ordered, func(i, j int) bool {

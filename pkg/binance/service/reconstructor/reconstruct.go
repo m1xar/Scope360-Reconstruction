@@ -161,9 +161,6 @@ type symbolWalk struct {
 // walkSymbolFills walks a symbol's trades backwards in 7-day windows down to
 // floorMs (the symbol's first trade). With a cutoff it stops once the window
 // is past it and no episode is left half walked, so positions that straddle
-// the cutoff are still completed. With untilResolved the walk also has to
-// reach the opening fill of every open position seeded from openPositions;
-// without a cutoff it stops as soon as it has.
 func walkSymbolFills(
 	fetch func(startMs, endMs int64) ([]models.Trade, error),
 	symbol string,
@@ -346,8 +343,6 @@ func fetchSymbolConfigLenient(client *resty.Client) map[string]models.SymbolConf
 	return cfg
 }
 
-// ReconstructClosedPositions builds the positions closed after the cutoff
-// (the whole history when cutoff is nil).
 func ReconstructClosedPositions(
 	client *resty.Client,
 	cutoff *time.Time,
@@ -359,8 +354,6 @@ func ReconstructClosedPositions(
 	return d.ClosedPositions()
 }
 
-// ReconstructOpenPositions builds the open positions with their opening
-// orders.
 func ReconstructOpenPositions(client *resty.Client) ([]domain.OpenPosition, error) {
 	d, err := Load(client, nil, scope.Open)
 	if err != nil {

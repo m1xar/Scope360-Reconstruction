@@ -18,8 +18,6 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
-// Dataset is every raw BloFin response the builders need, fetched once by
-// Load for the requested scope.
 type Dataset struct {
 	client  *resty.Client
 	baseURL string
@@ -29,8 +27,8 @@ type Dataset struct {
 	instruments map[string]models.Instrument
 	open        []models.OpenPosition
 
-	fills  []models.Fill   // the walk's fills, or those since the oldest open position
-	groups [][]models.Fill // closed episodes ending after the cutoff
+	fills  []models.Fill
+	groups [][]models.Fill
 	orders []models.Order
 
 	fundingFees []models.FundingFee
@@ -44,8 +42,6 @@ type Dataset struct {
 	closedErr  error
 }
 
-// Load fetches the datasets the scope needs, once each. Balance snapshots
-// are built from the closed positions' PnL, so Balances implies Closed.
 func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope) (*Dataset, error) {
 	if s.Has(scope.Balances) {
 		s |= scope.Closed
@@ -74,15 +70,13 @@ func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope
 		when(s.Any(scope.Closed|scope.Balances), func() error {
 			equity, err := executors.FetchTotalEquity(client, baseURL)
 			if err != nil {
-				equityErr = err // closed positions only lose BalanceInit
+				equityErr = err
 				return nil
 			}
 			d.equity, d.equityOK = equity, true
 			return nil
 		}),
 		when(s.Any(scope.Closed|scope.Fundings), func() error {
-			// The funding-fee history only reaches back a week, so one
-			// fetch from the cutoff serves positions and the fundings list.
 			fees, err := executors.FetchAllFundingFees(client, baseURL, cutoffMs)
 			if err != nil {
 				if s.Has(scope.Fundings) {
@@ -104,8 +98,6 @@ func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope
 		return nil, equityErr
 	}
 
-	// Fills: the walk for closed positions (reaching the oldest open
-	// position when those are wanted too), or just the open positions'.
 	ordersFrom := int64(0)
 	if s.Has(scope.Open) {
 		if oldest := helpers.OldestPositionMs(d.open); oldest > 0 {
@@ -181,8 +173,6 @@ func (d *Dataset) loadTransfers(startMs int64) error {
 	return nil
 }
 
-// ClosedPositions builds the positions closed inside the window, with
-// MAE/MFE from candles and BalanceInit from transfers and realised PnL.
 func (d *Dataset) ClosedPositions() ([]domain.Position, error) {
 	d.closedOnce.Do(func() { d.closed, d.closedErr = d.buildClosed() })
 	return d.closed, d.closedErr
@@ -226,7 +216,6 @@ func (d *Dataset) buildClosed() ([]domain.Position, error) {
 	return positions, nil
 }
 
-// OpenPositions builds the open positions with their opening orders.
 func (d *Dataset) OpenPositions() ([]domain.OpenPosition, error) {
 	if len(d.open) == 0 {
 		return []domain.OpenPosition{}, nil
@@ -234,8 +223,6 @@ func (d *Dataset) OpenPositions() ([]domain.OpenPosition, error) {
 	return builders.BuildOpenPositions(d.open, d.fills, helpers.IndexOrdersByID(d.orders), d.instruments), nil
 }
 
-// BalanceSnapshots returns the equity after every transfer and closed
-// position inside the window plus the current equity.
 func (d *Dataset) BalanceSnapshots() ([]domain.UserBalanceSnapshot, error) {
 	positions, err := d.ClosedPositions()
 	if err != nil {
@@ -254,12 +241,10 @@ func (d *Dataset) BalanceSnapshots() ([]domain.UserBalanceSnapshot, error) {
 	return filtered, nil
 }
 
-// CurrentBalance is the account's total equity.
 func (d *Dataset) CurrentBalance() float64 {
 	return d.equity
 }
 
-// Transactions are the deposits and withdrawals inside the window.
 func (d *Dataset) Transactions() []domain.Transaction {
 	transactions := builders.BuildTransactionsFromTransfers(d.transfers)
 	if d.cutoff == nil {
@@ -274,7 +259,6 @@ func (d *Dataset) Transactions() []domain.Transaction {
 	return filtered
 }
 
-// Fundings are the funding fees inside the window (a week at most).
 func (d *Dataset) Fundings() []domain.UserFunding {
 	fundings := builders.BuildFundings(d.fundingFees)
 	if d.cutoff == nil {

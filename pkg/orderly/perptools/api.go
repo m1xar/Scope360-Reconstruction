@@ -26,10 +26,6 @@ func load(client *resty.Client, cfg connector.Config, days int, s scope.Scope) (
 	return reconstructor.Load(newClient(client, cfg), helpers.CutoffFromDays(days), s)
 }
 
-// Sync fetches the account's raw data once and builds every model from it:
-// closed and open positions, balance snapshots, the current balance,
-// transactions and fundings for the last days (the whole history when
-// days <= 0).
 func Sync(client *resty.Client, cfg connector.Config, days int) (*domain.Sync, error) {
 	d, err := load(client, cfg, days, scope.All)
 	if err != nil {
@@ -52,7 +48,6 @@ func Sync(client *resty.Client, cfg connector.Config, days int) (*domain.Sync, e
 }
 
 func GetBuiltPositions(client *resty.Client, cfg connector.Config, days int) ([]domain.Position, error) {
-	// Balances joins the scope for BalanceInit.
 	d, err := load(client, cfg, days, scope.Closed|scope.Balances)
 	if err != nil {
 		return nil, err

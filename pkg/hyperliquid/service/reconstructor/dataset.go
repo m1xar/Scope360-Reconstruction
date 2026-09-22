@@ -17,19 +17,14 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
-// Dataset is every raw Hyperliquid response the builders need, fetched once
-// by Load for the requested scope.
 type Dataset struct {
 	client         *resty.Client
 	endpoint, user string
 	cutoff         *time.Time
 	scope          scope.Scope
 
-	// fills is the whole history when open positions are in scope (they
-	// need it), otherwise the walk that covers the closed positions or just
-	// the fills since the cutoff for balances.
 	fills    []models.RawFill
-	segments [][]models.RawFill // closed episodes ending after the cutoff
+	segments [][]models.RawFill
 
 	orders      []models.HistoricalOrder
 	fundings    []models.FundingHistoryItem
@@ -38,7 +33,6 @@ type Dataset struct {
 	ledger      []models.NonFundingLedgerUpdate
 }
 
-// Load fetches the datasets the scope needs, once each.
 func Load(client *resty.Client, endpoint, user string, cutoff *time.Time, s scope.Scope) (*Dataset, error) {
 	d := &Dataset{client: client, endpoint: endpoint, user: user, cutoff: cutoff, scope: s}
 	cutoffMs := window.StartMs(cutoff)
@@ -83,8 +77,6 @@ func Load(client *resty.Client, endpoint, user string, cutoff *time.Time, s scop
 		return nil, err
 	}
 
-	// Funding for closed positions starts at the oldest surviving episode;
-	// the fundings list itself starts at the cutoff (0 = everything).
 	if s.Has(scope.Closed) && (len(d.segments) > 0 || s.Has(scope.Fundings)) {
 		since := int64(0)
 		if len(d.segments) > 0 {
@@ -112,9 +104,6 @@ func when(cond bool, fn func() error) func() error {
 	return fn
 }
 
-// loadFills fetches the fills the scope needs and segments the closed
-// episodes: the whole history when open positions are wanted, the cutoff
-// walk for closed positions only, the fills since the cutoff for balances.
 func (d *Dataset) loadFills() error {
 	switch {
 	case d.scope.Has(scope.Open) || (d.scope.Has(scope.Closed) && d.cutoff == nil):
@@ -152,7 +141,6 @@ func (d *Dataset) loadFundings(sinceMs int64) error {
 	return nil
 }
 
-// fillsFrom returns the loaded fills at or after fromMs.
 func (d *Dataset) fillsFrom(fromMs int64) []models.RawFill {
 	if fromMs <= 0 {
 		return append([]models.RawFill(nil), d.fills...)
@@ -166,8 +154,6 @@ func (d *Dataset) fillsFrom(fromMs int64) []models.RawFill {
 	return out
 }
 
-// snapshotsFrom rebuilds the balance history from the portfolio curve and
-// the fills at or after fromMs.
 func (d *Dataset) snapshotsFrom(fromMs int64) []domain.UserBalanceSnapshot {
 	snapshots := builders.BuildUserBalanceSnapshotsFromPortfolio(d.portfolio)
 	fills := d.fillsFrom(fromMs)
@@ -181,8 +167,6 @@ func (d *Dataset) snapshotsFrom(fromMs int64) []domain.UserBalanceSnapshot {
 	return snapshots
 }
 
-// ClosedPositions builds the positions closed inside the window, with
-// MAE/MFE from candles and BalanceInit from the balance history.
 func (d *Dataset) ClosedPositions() ([]domain.Position, error) {
 	if len(d.segments) == 0 {
 		return []domain.Position{}, nil
@@ -211,8 +195,6 @@ func (d *Dataset) ClosedPositions() ([]domain.Position, error) {
 		return positions[i].ClosedAt.Before(*positions[j].ClosedAt)
 	})
 
-	// The balance history for BalanceInit starts where the oldest surviving
-	// episode does (the cutoff at the latest).
 	earliest := d.segments[0][0].Time
 	for _, seg := range d.segments {
 		if seg[0].Time < earliest {
@@ -230,7 +212,6 @@ func (d *Dataset) ClosedPositions() ([]domain.Position, error) {
 	return positions, nil
 }
 
-// OpenPositions builds the open positions from the whole fill history.
 func (d *Dataset) OpenPositions() ([]domain.OpenPosition, error) {
 	candleRequests := make(chan helpers.CandleRequest, defaultCandleWorkers)
 	workers.StartCandleWorkers(d.client, d.endpoint, candleRequests, defaultCandleWorkers)
@@ -244,13 +225,10 @@ func (d *Dataset) OpenPositions() ([]domain.OpenPosition, error) {
 	return openPositions, nil
 }
 
-// BalanceSnapshots returns the account value history inside the window,
-// rebuilt from the portfolio curve and the fills since the cutoff.
 func (d *Dataset) BalanceSnapshots() []domain.UserBalanceSnapshot {
 	return helpers.FilterBalanceSnapshotsByCreatedAt(d.snapshotsFrom(window.StartMs(d.cutoff)), d.cutoff)
 }
 
-// CurrentBalance is the latest account value of the portfolio curve.
 func (d *Dataset) CurrentBalance() float64 {
 	snapshots := builders.BuildUserBalanceSnapshotsFromPortfolio(d.portfolio)
 	if len(snapshots) == 0 {
@@ -262,7 +240,6 @@ func (d *Dataset) CurrentBalance() float64 {
 	return snapshots[len(snapshots)-1].Balance
 }
 
-// Transactions are the deposits and withdrawals inside the window.
 func (d *Dataset) Transactions() []domain.Transaction {
 	transactions := builders.BuildTransactions(d.ledger)
 	if d.cutoff == nil {
@@ -277,7 +254,6 @@ func (d *Dataset) Transactions() []domain.Transaction {
 	return filtered
 }
 
-// Fundings are the funding payments inside the window.
 func (d *Dataset) Fundings() []domain.UserFunding {
 	fundings := make([]domain.UserFunding, 0, len(d.fundings))
 	for _, fund := range d.fundings {

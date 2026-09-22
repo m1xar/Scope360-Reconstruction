@@ -18,19 +18,17 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
-// Dataset is every raw Orderly response the builders need, fetched once by
-// Load for the requested scope.
 type Dataset struct {
 	client *connector.Client
 	cutoff *time.Time
 	scope  scope.Scope
 
-	snapshot *models.OrderlyPositionsResponse // positions, leverage, account value
+	snapshot *models.OrderlyPositionsResponse
 	open     []models.OrderlyPosition
 
 	walk   TradeWalk
-	groups [][]models.OrderlyTrade // closed episodes ending after the cutoff
-	trades []models.OrderlyTrade   // trades reaching the oldest open position
+	groups [][]models.OrderlyTrade
+	trades []models.OrderlyTrade
 
 	orders     []models.OrderlyOrder
 	algoOrders []models.OrderlyAlgoOrder
@@ -44,8 +42,6 @@ type Dataset struct {
 	closedErr  error
 }
 
-// Load fetches the datasets the scope needs, once each. Balance snapshots
-// are built from the closed positions' PnL, so Balances implies Closed.
 func Load(client *connector.Client, cutoff *time.Time, s scope.Scope) (*Dataset, error) {
 	if s.Has(scope.Balances) {
 		s |= scope.Closed
@@ -86,8 +82,6 @@ func Load(client *connector.Client, cutoff *time.Time, s scope.Scope) (*Dataset,
 		return nil, err
 	}
 
-	// Trades: the walk for closed positions (reaching the oldest open
-	// position when those are wanted too), or just the open positions'.
 	reachMs := int64(0)
 	if s.Has(scope.Open) {
 		reachMs = oldestOpenMs(d.open)
@@ -128,7 +122,7 @@ func Load(client *connector.Client, cutoff *time.Time, s scope.Scope) (*Dataset,
 				if len(d.groups) > 0 {
 					return err
 				}
-				return nil // open positions only lose their order details
+				return nil
 			}
 			d.orders = orders
 			return nil
@@ -145,8 +139,6 @@ func Load(client *connector.Client, cutoff *time.Time, s scope.Scope) (*Dataset,
 			return d.loadFundings(fundingsFrom)
 		}),
 		when(s.Has(scope.Balances), func() error {
-			// The balance curve starts at the earliest of the cutoff and the
-			// oldest surviving position's open.
 			from := cutoffMs
 			if cutoff != nil && len(d.groups) > 0 && since < from {
 				from = since
@@ -191,9 +183,6 @@ func oldestOpenMs(open []models.OrderlyPosition) int64 {
 	return start
 }
 
-// ClosedPositions builds the positions closed inside the window, with
-// MAE/MFE from candles, current leverage and liquidation price, and
-// BalanceInit from the balance curve.
 func (d *Dataset) ClosedPositions() ([]domain.Position, error) {
 	d.closedOnce.Do(func() { d.closed, d.closedErr = d.buildClosed() })
 	return d.closed, d.closedErr
@@ -253,8 +242,6 @@ func (d *Dataset) buildClosed() ([]domain.Position, error) {
 	return helpers.FilterPositionsByClosedAt(positions, d.cutoff), nil
 }
 
-// rawSnapshots builds the balance curve from the account value, the asset
-// history and the positions' PnL, back to the oldest position's open.
 func (d *Dataset) rawSnapshots(positions []domain.Position) ([]domain.UserBalanceSnapshot, error) {
 	return builders.BuildBalanceSnapshots(
 		d.snapshot.AccountValue,
@@ -265,15 +252,12 @@ func (d *Dataset) rawSnapshots(positions []domain.Position) ([]domain.UserBalanc
 	)
 }
 
-// OpenPositions builds the open positions with their orders.
 func (d *Dataset) OpenPositions() ([]domain.OpenPosition, error) {
 	positions := builders.BuildOpenPositions(d.open)
 	enrichOpenPositionOrders(d.trades, helpers.BuildOrderMap(d.orders), positions)
 	return positions, nil
 }
 
-// BalanceSnapshots returns the account value after every transfer and
-// closed position inside the window, oldest first.
 func (d *Dataset) BalanceSnapshots() ([]domain.UserBalanceSnapshot, error) {
 	positions, err := d.ClosedPositions()
 	if err != nil {
@@ -290,13 +274,10 @@ func (d *Dataset) BalanceSnapshots() ([]domain.UserBalanceSnapshot, error) {
 	return snapshots, nil
 }
 
-// CurrentBalance is the account value.
 func (d *Dataset) CurrentBalance() float64 {
 	return helpers.Round8(d.snapshot.AccountValue)
 }
 
-// Transactions are the completed deposits and withdrawals inside the
-// window, valued at mark prices.
 func (d *Dataset) Transactions() ([]domain.Transaction, error) {
 	transactions, err := builders.BuildTransactions(d.assetHistory, d.markPrices)
 	if err != nil {
@@ -314,7 +295,6 @@ func (d *Dataset) Transactions() ([]domain.Transaction, error) {
 	return filtered, nil
 }
 
-// Fundings are the funding payments inside the window.
 func (d *Dataset) Fundings() []domain.UserFunding {
 	fundings := make([]domain.UserFunding, 0, len(d.fundings))
 	for _, fund := range d.fundings {

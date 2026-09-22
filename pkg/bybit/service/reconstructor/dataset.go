@@ -17,8 +17,6 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
-// Dataset is every raw Bybit response the builders need, fetched once by
-// Load for the requested scope.
 type Dataset struct {
 	client *resty.Client
 	cutoff *time.Time
@@ -29,17 +27,11 @@ type Dataset struct {
 	wallet   models.WalletAccount
 	walletOK bool
 
-	// walk is the weekly pass over the transaction log, orders and closed
-	// PnL; its unfiltered ledger entries also feed balances, transactions
-	// and fundings. Scopes without positions load the ledger directly.
 	walk   Walk
 	ledger *helpers.Ledger
-	groups [][]helpers.Fill // closed episodes ending after the cutoff
+	groups [][]helpers.Fill
 }
 
-// Load fetches the datasets the scope needs, once each. One weekly walk
-// serves closed and open positions: with both in scope it runs past the
-// cutoff until every open position is walked back to its opening fill.
 func Load(client *resty.Client, cutoff *time.Time, s scope.Scope) (*Dataset, error) {
 	d := &Dataset{client: client, cutoff: cutoff, scope: s}
 
@@ -64,7 +56,7 @@ func Load(client *resty.Client, cutoff *time.Time, s scope.Scope) (*Dataset, err
 		when(s.Any(scope.Closed|scope.Balances), func() error {
 			wallet, err := executors.FetchWalletBalance(client)
 			if err != nil {
-				walletErr = err // closed positions only lose BalanceInit
+				walletErr = err
 				return nil
 			}
 			d.wallet, d.walletOK = wallet, true
@@ -93,9 +85,6 @@ func Load(client *resty.Client, cutoff *time.Time, s scope.Scope) (*Dataset, err
 	if s.Has(scope.Closed) {
 		walkCutoff = cutoff
 	}
-	// Without a cutoff the closed walk covers the whole retention, opening
-	// fills included; otherwise it has to resolve the open positions past
-	// the cutoff.
 	untilResolved := s.Has(scope.Open) && !(s.Has(scope.Closed) && cutoff == nil)
 	walk, err := CollectWeeks(client, d.open, walkCutoff, untilResolved)
 	if err != nil {
@@ -116,9 +105,6 @@ func when(cond bool, fn func() error) func() error {
 	return fn
 }
 
-// loadLedger fetches the transaction log from startMs for scopes without
-// positions: every type for balances, only the types a transactions- or
-// fundings-only scope reads.
 func (d *Dataset) loadLedger(startMs int64) (*helpers.Ledger, error) {
 	var filters []executors.LedgerFilter
 	switch {
@@ -140,8 +126,6 @@ func (d *Dataset) loadLedger(startMs int64) (*helpers.Ledger, error) {
 	return helpers.BuildLedger(rows), nil
 }
 
-// ClosedPositions builds the positions closed inside the window, with
-// MAE/MFE from candles and BalanceInit from the transaction log.
 func (d *Dataset) ClosedPositions() ([]domain.Position, error) {
 	if len(d.groups) == 0 {
 		return []domain.Position{}, nil
@@ -186,7 +170,6 @@ func (d *Dataset) ClosedPositions() ([]domain.Position, error) {
 	return positions, nil
 }
 
-// OpenPositions builds the open positions with their opening orders.
 func (d *Dataset) OpenPositions() ([]domain.OpenPosition, error) {
 	if len(d.open) == 0 {
 		return []domain.OpenPosition{}, nil
@@ -194,8 +177,6 @@ func (d *Dataset) OpenPositions() ([]domain.OpenPosition, error) {
 	return builders.BuildOpenPositions(d.open, d.walk.Fills, helpers.IndexOrdersByID(d.walk.Orders)), nil
 }
 
-// BalanceSnapshots returns the wallet balance after every stable-asset
-// ledger entry in the window plus the current balance.
 func (d *Dataset) BalanceSnapshots() []domain.UserBalanceSnapshot {
 	snapshots := builders.BuildBalanceSnapshots(executors.TotalWalletBalance(d.wallet), d.ledger, d.cutoff)
 	if d.cutoff == nil {
@@ -210,12 +191,10 @@ func (d *Dataset) BalanceSnapshots() []domain.UserBalanceSnapshot {
 	return out
 }
 
-// CurrentBalance is the unified account's total equity.
 func (d *Dataset) CurrentBalance() float64 {
 	return helpers.Round8(executors.TotalEquity(d.wallet))
 }
 
-// Transactions are the stable-asset transfers inside the window.
 func (d *Dataset) Transactions() []domain.Transaction {
 	transactions := builders.BuildTransactions(d.ledger)
 	if d.cutoff == nil {
@@ -230,7 +209,6 @@ func (d *Dataset) Transactions() []domain.Transaction {
 	return out
 }
 
-// Fundings are the linear settlement payments inside the window.
 func (d *Dataset) Fundings() []domain.UserFunding {
 	fundings := builders.BuildFundings(d.ledger)
 	if d.cutoff == nil {

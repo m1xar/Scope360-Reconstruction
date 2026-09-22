@@ -38,10 +38,6 @@ func load(client *resty.Client, creds krakenclient.Credentials, days int, s scop
 	return reconstructor.Load(authClient(client, creds), helpers.CutoffFromDays(days), s)
 }
 
-// Sync fetches the account's raw data once and builds every model from it:
-// closed and open positions, balance snapshots, the current balance,
-// transactions and fundings for the last days (the whole history when
-// days <= 0).
 func Sync(
 	client *resty.Client,
 	creds krakenclient.Credentials,
@@ -137,7 +133,6 @@ func GetCurrentBalance(
 		}
 	}
 
-	// Fall back to the latest balance snapshot of the whole account log.
 	logs, logErr := executors.FetchAllAccountLogSince(client, time.Time{})
 	if logErr != nil {
 		if err != nil {

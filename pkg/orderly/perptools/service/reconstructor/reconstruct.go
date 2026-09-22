@@ -25,7 +25,7 @@ const (
 
 type TradeWalk struct {
 	Groups [][]models.OrderlyTrade
-	Trades []models.OrderlyTrade // every trade the walk fetched
+	Trades []models.OrderlyTrade
 }
 
 func (w TradeWalk) EarliestOpenMs() int64 {
@@ -45,10 +45,6 @@ func (w TradeWalk) EarliestOpenMs() int64 {
 	return earliest
 }
 
-// collectClosedEpisodes walks the trades newest first in two-week chunks,
-// seeded with the open positions, until the cutoff is passed, no episode is
-// left half walked and reachMs (the oldest open position, when its trades
-// are wanted too) is covered; with no cutoff it fetches the whole history.
 func collectClosedEpisodes(
 	client *connector.Client,
 	symbol string,
@@ -120,15 +116,12 @@ func GroupsClosedAfter(groups [][]models.OrderlyTrade, cutoff *time.Time) [][]mo
 	return kept
 }
 
-// ReconstructClosedPositions builds the positions closed after the cutoff
-// (the whole history when cutoff is nil), without current risk data or
-// BalanceInit.
 func ReconstructClosedPositions(
 	client *connector.Client,
 	symbol string,
 	cutoff *time.Time,
 ) ([]domain.Position, error) {
-	_ = symbol // every symbol is walked
+	_ = symbol
 	d, err := Load(client, cutoff, scope.Closed)
 	if err != nil {
 		return nil, err
@@ -209,8 +202,6 @@ func ReconstructTrades(
 	}
 }
 
-// enrichOpenPositionOrders attaches to each open position the trades on its
-// symbol since it opened, as orders.
 func enrichOpenPositionOrders(trades []models.OrderlyTrade, orderMap map[int64]models.OrderlyOrder, positions []domain.OpenPosition) {
 	for i := range positions {
 		pos := &positions[i]
@@ -229,8 +220,6 @@ func enrichOpenPositionOrders(trades []models.OrderlyTrade, orderMap map[int64]m
 	}
 }
 
-// enrichPositionsWithRisk copies the current leverage and liquidation price
-// of every symbol from the positions snapshot onto the closed positions.
 func enrichPositionsWithRisk(resp *models.OrderlyPositionsResponse, positions []domain.Position) {
 	if resp == nil || len(resp.Rows) == 0 || len(positions) == 0 {
 		return

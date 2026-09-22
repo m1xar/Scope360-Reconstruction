@@ -35,10 +35,6 @@ func load(client *resty.Client, creds binanceclient.Credentials, days int, s sco
 	return reconstructor.Load(authClient(client, creds), helpers.CutoffFromDays(days), s)
 }
 
-// Sync fetches the account's raw data once and builds every model from it:
-// closed and open positions, balance snapshots, the current balance,
-// transactions and fundings for the last days (the whole retention when
-// days <= 0).
 func Sync(
 	client *resty.Client,
 	creds binanceclient.Credentials,

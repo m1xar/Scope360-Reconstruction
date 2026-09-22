@@ -16,8 +16,6 @@ const billsPageLimit = 100
 
 const billsWindowSize = 90 * 24 * time.Hour
 
-// BillsDefaultStartMs is where the bill history starts when no start is
-// given: the archive is only walked back one window.
 func BillsDefaultStartMs() int64 {
 	return time.Now().UnixMilli() - billsWindowSize.Milliseconds()
 }

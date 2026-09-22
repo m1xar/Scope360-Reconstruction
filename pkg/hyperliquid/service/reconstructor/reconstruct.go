@@ -232,8 +232,6 @@ func FillsSince(
 	return helpers.NormalizeFills(fills), nil
 }
 
-// ReconstructClosedPositions builds the positions closed after the cutoff
-// (the whole history when cutoff is nil).
 func ReconstructClosedPositions(
 	client *resty.Client,
 	endpoint, user string,
@@ -322,8 +320,6 @@ func FindClosedPosition(
 	return result, nil
 }
 
-// ReconstructOpenPositions builds the open positions from the whole fill
-// history.
 func ReconstructOpenPositions(
 	client *resty.Client,
 	endpoint, user string,

@@ -30,10 +30,6 @@ func load(client *resty.Client, creds okxclient.Credentials, baseURL string, day
 	return reconstructor.Load(client, baseURL, helpers.CutoffFromDays(days), s)
 }
 
-// Sync fetches the account's raw data once and builds every model from it:
-// closed and open positions, balance snapshots, the current balance,
-// transactions and fundings for the last days (the whole archive when
-// days <= 0).
 func Sync(
 	client *resty.Client,
 	creds okxclient.Credentials,
