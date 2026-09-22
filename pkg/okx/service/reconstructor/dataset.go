@@ -23,6 +23,10 @@ type Dataset struct {
 	baseURL string
 	cutoff  *time.Time
 	scope   scope.Scope
+	// windowMs is where balances, transactions and fundings start: the
+	// cutoff, or the bill archive's default depth without one. Bills for
+	// BalanceInit may reach further back.
+	windowMs int64
 
 	closed      []models.ClosedPosition // closed inside the window
 	open        []models.OpenPosition
@@ -49,6 +53,10 @@ type Dataset struct {
 func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope) (*Dataset, error) {
 	d := &Dataset{client: client, baseURL: baseURL, cutoff: cutoff, scope: s}
 	cutoffMs := window.StartMs(cutoff)
+	d.windowMs = cutoffMs
+	if d.windowMs <= 0 {
+		d.windowMs = executors.BillsDefaultStartMs()
+	}
 
 	// Phase 1: position lists and the balance are independent.
 	var balErr error
@@ -89,7 +97,7 @@ func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope
 
 	// Phase 2: everything keyed by the positions found above.
 	ordersFrom, fillsFrom := d.orderRanges()
-	billsFrom, billsWanted := d.billsRange(cutoffMs)
+	billsFrom, billsWanted := d.billsRange()
 	identifiers := d.identifiers()
 
 	var ordersErr error
@@ -169,13 +177,10 @@ func (d *Dataset) orderRanges() (ordersFrom, fillsFrom int64) {
 // billsRange returns where the bill history has to start for the scope: the
 // oldest closed position for BalanceInit, the cutoff (or the archive's
 // default depth) for snapshots, transactions and fundings.
-func (d *Dataset) billsRange(cutoffMs int64) (int64, bool) {
+func (d *Dataset) billsRange() (int64, bool) {
 	from, wanted := int64(0), false
 	if d.scope.Any(scope.Balances | scope.Transactions | scope.Fundings) {
-		from, wanted = cutoffMs, true
-		if from <= 0 {
-			from = executors.BillsDefaultStartMs()
-		}
+		from, wanted = d.windowMs, true
 	}
 	if d.scope.Has(scope.Closed) && len(d.closed) > 0 {
 		oldest := oldestClosedMs(d.closed) - 10*60*1000
@@ -295,12 +300,9 @@ func (d *Dataset) OpenPositions() ([]domain.OpenPosition, error) {
 // the window plus the current balance.
 func (d *Dataset) BalanceSnapshots() []domain.UserBalanceSnapshot {
 	snapshots := d.allSnapshots()
-	if d.cutoff == nil {
-		return append([]domain.UserBalanceSnapshot{}, snapshots...)
-	}
 	out := make([]domain.UserBalanceSnapshot, 0, len(snapshots))
 	for _, s := range snapshots {
-		if !s.CreatedAt.Before(*d.cutoff) {
+		if s.CreatedAt.UnixMilli() >= d.windowMs {
 			out = append(out, s)
 		}
 	}
@@ -316,12 +318,9 @@ func (d *Dataset) CurrentBalance() float64 {
 // inside the window.
 func (d *Dataset) Transactions() []domain.Transaction {
 	transactions := builders.BuildTransactionsFromBills(d.bills)
-	if d.cutoff == nil {
-		return transactions
-	}
 	out := make([]domain.Transaction, 0, len(transactions))
 	for _, tx := range transactions {
-		if !tx.Time.Before(*d.cutoff) {
+		if tx.Time.UnixMilli() >= d.windowMs {
 			out = append(out, tx)
 		}
 	}
@@ -330,13 +329,9 @@ func (d *Dataset) Transactions() []domain.Transaction {
 
 // Fundings are the non-zero funding-fee bills inside the window.
 func (d *Dataset) Fundings() []domain.UserFunding {
-	cutoffMs := window.StartMs(d.cutoff)
 	fundings := make([]domain.UserFunding, 0)
 	for _, b := range d.swapFuturesBills() {
-		if b.Type != "8" {
-			continue
-		}
-		if cutoffMs > 0 && helpers.MustInt64(b.Ts) < cutoffMs {
+		if b.Type != "8" || helpers.MustInt64(b.Ts) < d.windowMs {
 			continue
 		}
 		amount := helpers.MustFloat(b.BalChg)
