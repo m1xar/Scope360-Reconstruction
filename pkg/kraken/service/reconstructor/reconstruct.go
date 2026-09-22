@@ -1,7 +1,6 @@
 package reconstructor
 
 import (
-	"math"
 	"sort"
 	"strings"
 	"time"
@@ -221,9 +220,10 @@ func EnrichOpenPositionOrders(
 		return
 	}
 
-	// Fills before a position's OpenTime are discarded below, so the fetch
-	// only needs to reach back to the oldest open position.
-	fills, err := executors.FetchAllFills(client, daysCovering(positions))
+	// Kraken reports no usable open time for a position (fillTime is the
+	// epoch), so its fills are found by walking the history backwards from
+	// the live size until every open position is back at zero.
+	openFills, err := CollectOpenFills(client, raw)
 	if err != nil {
 		return
 	}
@@ -236,42 +236,60 @@ func EnrichOpenPositionOrders(
 		if posIdx >= len(positions) {
 			return
 		}
-
-		openTime := positions[posIdx].OpenTime
-		symbol := strings.ToUpper(rawPos.Symbol)
-		matched := make([]models.Fill, 0)
-		for _, fill := range fills {
-			if strings.ToUpper(fill.Symbol) != symbol {
-				continue
-			}
-			fillTime, err := helpers.ParseTime(fill.FillTime)
-			if err != nil || fillTime.Before(openTime) {
-				continue
-			}
-			matched = append(matched, fill)
-		}
-
+		matched := openFills[strings.ToUpper(strings.TrimSpace(rawPos.Symbol))]
 		positions[posIdx].Orders = builders.BuildOpenOrdersFromFills(matched, positions[posIdx].ID)
 		posIdx++
 	}
 }
 
-// daysCovering returns the days argument for FetchAllFills that reaches the
-// oldest OpenTime among positions; 0 (full history) when none is known.
-func daysCovering(positions []domain.OpenPosition) int {
-	var oldest time.Time
-	for _, pos := range positions {
-		if pos.OpenTime.IsZero() {
-			return 0
-		}
-		if oldest.IsZero() || pos.OpenTime.Before(oldest) {
-			oldest = pos.OpenTime
-		}
+// CollectOpenFills pages fills newest first until the walker seeded with the
+// open positions is resolved (or the lookback floor is hit) and returns the
+// fills of each open position, oldest first, keyed by symbol.
+func CollectOpenFills(client *resty.Client, openPositions []models.OpenPosition) (map[string][]models.Fill, error) {
+	segmenter := helpers.NewFillSegmenter(openPositions)
+	if segmenter.Resolved() {
+		return map[string][]models.Fill{}, nil
 	}
-	if oldest.IsZero() {
-		return 0
+
+	var (
+		floor  = time.Now().Add(-maxFillLookback)
+		seen   = make(map[string]struct{})
+		cursor string
+	)
+	for {
+		page, err := executors.FetchFills(client, cursor)
+		if err != nil {
+			return nil, err
+		}
+		if len(page) == 0 {
+			break
+		}
+
+		fresh := make([]models.Fill, 0, len(page))
+		oldest := time.Time{}
+		for _, fill := range page {
+			at, err := helpers.ParseTime(fill.FillTime)
+			if err != nil {
+				continue
+			}
+			if oldest.IsZero() || at.Before(oldest) {
+				oldest = at
+			}
+			key := builderFillKey(fill)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			fresh = append(fresh, fill)
+		}
+		segmenter.PushOlderBatch(fresh)
+
+		if segmenter.Resolved() || oldest.IsZero() || len(fresh) == 0 || len(page) < executors.FillsPageSize || oldest.Before(floor) {
+			break
+		}
+		cursor = executors.FormatKrakenTime(oldest)
 	}
-	return int(math.Ceil(time.Since(oldest).Hours()/24)) + 1
+	return segmenter.OpenFills(), nil
 }
 
 func ReconstructClosedPositions(
