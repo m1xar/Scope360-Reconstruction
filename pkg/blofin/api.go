@@ -12,6 +12,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/blofin/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/blofin/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
 const (
@@ -44,7 +45,7 @@ func GetClosedPositionByExactMatch(
 	openedAt time.Time,
 	side string,
 ) (*domain.Position, error) {
-	positions, err := GetBuiltPositions(client, creds, 0)
+	positions, err := GetBuiltPositions(client, creds, window.DaysSince(openedAt))
 	if err != nil {
 		return nil, err
 	}

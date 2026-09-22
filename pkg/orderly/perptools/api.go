@@ -14,6 +14,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/orderly/perptools/service/reconstructor/helpers"
 
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
 func newClient(httpClient *resty.Client, cfg connector.Config) *connector.Client {
@@ -52,7 +53,7 @@ func GetClosedPositionByExactMatch(
 	openedAt time.Time,
 	side string,
 ) (*domain.Position, error) {
-	positions, err := GetBuiltPositions(client, cfg, 0)
+	positions, err := GetBuiltPositions(client, cfg, window.DaysSince(openedAt))
 	if err != nil {
 		return nil, err
 	}

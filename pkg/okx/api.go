@@ -2,7 +2,6 @@ package okx
 
 import (
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -13,6 +12,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/helpers"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
 func GetAuthStatus(apiKey, secret, passphrase string) (string, okxclient.Region) {
@@ -32,7 +32,7 @@ func GetClosedPositionByExactMatch(
 	openedAt time.Time,
 	side string,
 ) (*domain.Position, error) {
-	positions, err := GetBuiltPositions(client, creds, baseURL, daysSince(openedAt))
+	positions, err := GetBuiltPositions(client, creds, baseURL, window.DaysSince(openedAt))
 	if err != nil {
 		return nil, err
 	}
@@ -208,10 +208,4 @@ func GetOpenPositions(
 	okxclient.AttachAuth(client, creds)
 
 	return reconstructor.ReconstructOpenPositions(client, baseURL)
-}
-
-// daysSince bounds a lookup for a position opened at t: it must have closed
-// after it opened, so the window only needs to reach back to t.
-func daysSince(t time.Time) int {
-	return int(math.Ceil(time.Since(t).Hours()/24)) + 1
 }

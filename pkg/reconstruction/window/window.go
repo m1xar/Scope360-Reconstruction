@@ -30,3 +30,9 @@ func Backward(endMs, floorMs, spanMs int64) []Span {
 	}
 	return spans
 }
+
+// DaysSince returns the days window that reaches back to t (with a day of
+// slack), for lookups of a position known to have opened at t.
+func DaysSince(t time.Time) int {
+	return int(time.Since(t).Hours()/24) + 2
+}
