@@ -12,7 +12,8 @@ const fundingRecordsPath = "/api/v1/private/position/funding_records"
 
 const fundingPageSize = 100
 
-func FetchAllFundingRecords(client *resty.Client) ([]models.FundingRecord, error) {
+// FetchAllFundingRecords pages funding (newest first) back to sinceMs; 0 pages everything.
+func FetchAllFundingRecords(client *resty.Client, sinceMs int64) ([]models.FundingRecord, error) {
 	var result []models.FundingRecord
 	page := 1
 
@@ -35,7 +36,7 @@ func FetchAllFundingRecords(client *resty.Client) ([]models.FundingRecord, error
 
 		result = append(result, data...)
 
-		if len(data) < fundingPageSize {
+		if len(data) < fundingPageSize || pageOlderThan(sinceMs, data, func(r models.FundingRecord) int64 { return r.SettleTime }) {
 			break
 		}
 		page++

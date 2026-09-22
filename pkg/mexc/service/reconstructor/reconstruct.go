@@ -17,7 +17,11 @@ import (
 const defaultCandleWorkers = 4
 
 func ReconstructClosedPositions(client *resty.Client, cutoff *time.Time) ([]domain.Position, error) {
-	closedPositions, err := executors.FetchAllHistoryPositions(client)
+	cutoffMs := int64(0)
+	if cutoff != nil {
+		cutoffMs = cutoff.UnixMilli()
+	}
+	closedPositions, err := executors.FetchAllHistoryPositions(client, cutoffMs)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +46,7 @@ func ReconstructClosedPositions(client *resty.Client, cutoff *time.Time) ([]doma
 	}
 	ordersBySymbol := helpers.GroupOrdersBySymbol(allOrders)
 
-	fundingRecords, err := executors.FetchAllFundingRecords(client)
+	fundingRecords, err := executors.FetchAllFundingRecords(client, oldestMs)
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +194,12 @@ func BalanceSnapshots(
 		return nil, err
 	}
 
-	transfers, err := executors.FetchAllTransferRecords(client)
+	windowStart := helpers.BalanceWindowStart(positions, cutoff)
+	transfersSinceMs := int64(0)
+	if windowStart != nil {
+		transfersSinceMs = windowStart.UnixMilli()
+	}
+	transfers, err := executors.FetchAllTransferRecords(client, transfersSinceMs)
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +208,7 @@ func BalanceSnapshots(
 		currentEquity,
 		transfers,
 		positions,
-		helpers.BalanceWindowStart(positions, cutoff),
+		windowStart,
 	), nil
 }
 

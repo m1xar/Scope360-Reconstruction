@@ -13,6 +13,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/service/reconstructor"
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/service/reconstructor/helpers"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
 func GetAuthStatus(client *resty.Client, creds mexcclient.Credentials) string {
@@ -54,7 +55,7 @@ func GetClosedPositionByExactMatch(
 	openedAt time.Time,
 	side string,
 ) (*domain.Position, error) {
-	positions, err := GetBuiltPositions(client, creds, 0)
+	positions, err := GetBuiltPositions(client, creds, window.DaysSince(openedAt))
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +148,7 @@ func GetTransactions(
 ) ([]domain.Transaction, error) {
 	mexcclient.AttachAuth(client, creds)
 
-	transfers, err := executors.FetchAllTransferRecords(client)
+	transfers, err := executors.FetchAllTransferRecords(client, cutoffMsFromDays(days))
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +174,7 @@ func GetFundings(
 ) ([]domain.UserFunding, error) {
 	mexcclient.AttachAuth(client, creds)
 
-	records, err := executors.FetchAllFundingRecords(client)
+	records, err := executors.FetchAllFundingRecords(client, cutoffMsFromDays(days))
 	if err != nil {
 		return nil, err
 	}
@@ -213,4 +214,11 @@ func GetCandles(
 		client, symbol, interval,
 		startTime.UnixMilli(), endTime.UnixMilli(),
 	)
+}
+
+func cutoffMsFromDays(days int) int64 {
+	if cutoff := helpers.CutoffFromDays(days); cutoff != nil {
+		return cutoff.UnixMilli()
+	}
+	return 0
 }

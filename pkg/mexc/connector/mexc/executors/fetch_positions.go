@@ -12,7 +12,9 @@ const historyPositionsPath = "/api/v1/private/position/list/history_positions"
 
 const positionsPageSize = 100
 
-func FetchAllHistoryPositions(client *resty.Client) ([]models.HistoryPosition, error) {
+// FetchAllHistoryPositions pages history_positions (newest first) and stops
+// once a whole page was updated before sinceMs; 0 pages everything.
+func FetchAllHistoryPositions(client *resty.Client, sinceMs int64) ([]models.HistoryPosition, error) {
 	var result []models.HistoryPosition
 	page := 1
 
@@ -35,13 +37,28 @@ func FetchAllHistoryPositions(client *resty.Client) ([]models.HistoryPosition, e
 
 		result = append(result, data...)
 
-		if len(data) < positionsPageSize {
+		if len(data) < positionsPageSize || pageOlderThan(sinceMs, data, func(p models.HistoryPosition) int64 { return p.UpdateTime }) {
 			break
 		}
 		page++
 	}
 
 	return result, nil
+}
+
+// pageOlderThan reports whether every row of a page is older than sinceMs.
+// Pages come newest first, so nothing after such a page can be inside the
+// window; checking the whole page tolerates slightly unordered rows.
+func pageOlderThan[T any](sinceMs int64, page []T, timeOf func(T) int64) bool {
+	if sinceMs <= 0 || len(page) == 0 {
+		return false
+	}
+	for _, row := range page {
+		if timeOf(row) >= sinceMs {
+			return false
+		}
+	}
+	return true
 }
 
 const openPositionsPath = "/api/v1/private/position/open_positions"

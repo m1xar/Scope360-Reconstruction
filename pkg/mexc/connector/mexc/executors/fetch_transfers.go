@@ -12,7 +12,8 @@ const transferRecordPath = "/api/v1/private/account/transfer_record"
 
 const transferPageSize = 100
 
-func FetchAllTransferRecords(client *resty.Client) ([]models.TransferRecord, error) {
+// FetchAllTransferRecords pages transfers (newest first) back to sinceMs; 0 pages everything.
+func FetchAllTransferRecords(client *resty.Client, sinceMs int64) ([]models.TransferRecord, error) {
 	var result []models.TransferRecord
 	page := 1
 
@@ -36,7 +37,7 @@ func FetchAllTransferRecords(client *resty.Client) ([]models.TransferRecord, err
 
 		result = append(result, data...)
 
-		if len(data) < transferPageSize {
+		if len(data) < transferPageSize || pageOlderThan(sinceMs, data, func(r models.TransferRecord) int64 { return r.CreateTime }) {
 			break
 		}
 		page++
