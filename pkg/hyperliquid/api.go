@@ -149,7 +149,11 @@ func GetFundings(
 		client = newDefaultClient()
 	}
 
-	rawFundings, err := executors.FetchAllFunding(client, endpoint, user, 0)
+	startMs := int64(0)
+	if cutoff := helpers.CutoffFromDays(days); cutoff != nil {
+		startMs = cutoff.UnixMilli()
+	}
+	rawFundings, err := executors.FetchAllFunding(client, endpoint, user, startMs)
 	if err != nil {
 		return nil, err
 	}

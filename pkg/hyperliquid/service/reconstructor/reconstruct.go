@@ -9,6 +9,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/hyperliquid/executors"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor/workers"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 	"sort"
 
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
@@ -140,27 +141,67 @@ func CollectEpisodes(
 		cutoffMs  = cutoff.UnixMilli()
 	)
 
-	window, err := executors.FetchFillsRange(client, endpoint, user, cutoffMs, time.Now().UnixMilli())
+	recent, err := executors.FetchFillsRange(client, endpoint, user, cutoffMs, time.Now().UnixMilli())
 	if err != nil {
 		return FillWalk{}, err
 	}
-	window = helpers.NormalizeFills(window)
-	walk.Segments = append(walk.Segments, segmenter.PushOlderBatch(window)...)
-	walk.Fills = window
+	recent = helpers.NormalizeFills(recent)
+	walk.Segments = append(walk.Segments, segmenter.PushOlderBatch(recent)...)
+	walk.Fills = recent
 
-	if segmenter.Flat() {
-		return walk, nil
+	fetch := func(startMs, endMs int64) ([]models.RawFill, error) {
+		return executors.FetchFillsRange(client, endpoint, user, startMs, endMs)
 	}
-
-	earlier, err := executors.FetchFillsRange(client, endpoint, user, 0, cutoffMs-1)
+	earlier, segments, err := walkEarlier(fetch, segmenter, cutoffMs-1, time.Now().UnixMilli()-window.Retention.Milliseconds())
 	if err != nil {
 		return FillWalk{}, err
 	}
-	earlier = helpers.NormalizeFills(earlier)
-	walk.Segments = append(walk.Segments, segmenter.PushOlderBatch(earlier)...)
+	walk.Segments = append(walk.Segments, segments...)
 	walk.Fills = append(earlier, walk.Fills...)
 
 	return walk, nil
+}
+
+// earlierFillsWindow is the span of one backwards fills request before the
+// cutoff; positions rarely straddle it by more than a few windows.
+const earlierFillsWindow = 30 * 24 * time.Hour
+
+// walkEarlier fetches fills older than endMs in windows, newest first, only
+// while some position is still half walked (an episode that closed inside
+// the cutoff window but opened before it). Every fill carries its
+// startPosition, so the walker seeds itself and Flat() is exact. Returns the
+// fetched fills oldest first and the closed episodes found.
+func walkEarlier(
+	fetch func(startMs, endMs int64) ([]models.RawFill, error),
+	segmenter *helpers.FillSegmenter,
+	endMs, floorMs int64,
+) ([]models.RawFill, [][]models.RawFill, error) {
+	var (
+		earlier  []models.RawFill
+		segments [][]models.RawFill
+		synthTid int64
+	)
+	for _, span := range window.Backward(endMs, floorMs, earlierFillsWindow.Milliseconds()) {
+		if segmenter.Flat() {
+			break
+		}
+		fills, err := fetch(span.StartMs, span.EndMs)
+		if err != nil {
+			return nil, nil, err
+		}
+		fills = helpers.NormalizeFills(fills)
+		// NormalizeFills numbers synthetic tids from -1 on every call; keep
+		// them unique across windows.
+		for i := range fills {
+			if fills[i].Tid < 0 {
+				synthTid--
+				fills[i].Tid = synthTid
+			}
+		}
+		segments = append(segments, segmenter.PushOlderBatch(fills)...)
+		earlier = append(fills, earlier...)
+	}
+	return earlier, segments, nil
 }
 
 func FillsSince(
@@ -265,7 +306,9 @@ func FindClosedPosition(
 	pair = helpers.NormalizeContractName(pair)
 	coin := helpers.CoinFromPair(pair)
 
-	allFills, err := executors.FetchAllFills(client, endpoint, user)
+	// The position opened at openedAt, so nothing before it is needed.
+	sinceMs := openedAt.UnixMilli()
+	allFills, err := executors.FetchFillsRange(client, endpoint, user, sinceMs, time.Now().UnixMilli())
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +321,7 @@ func FindClosedPosition(
 		return nil, err
 	}
 
-	rawFundings, err := executors.FetchAllFunding(client, endpoint, user, 0)
+	rawFundings, err := executors.FetchAllFunding(client, endpoint, user, sinceMs)
 	if err != nil {
 		return nil, err
 	}
