@@ -9,6 +9,7 @@ import (
 	connector "github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader"
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader/executors"
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader/models"
+	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/service/reconstructor"
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
@@ -35,40 +36,7 @@ func GetBuiltPositions(
 	cfg connector.Config,
 	days int,
 ) ([]domain.FXPosition, error) {
-	return buildPositions(client, cfg, days, true)
-}
-
-// buildPositions loads days of history (positions opened earlier are
-// backfilled by id in LoadHistory) and builds the closed positions; MAE/MFE
-// candles are only fetched when withMAE is set.
-func buildPositions(
-	client *connector.Client,
-	cfg connector.Config,
-	days int,
-	withMAE bool,
-) ([]domain.FXPosition, error) {
-	ctx := context.Background()
-	c := newClient(client, cfg)
-
-	deals, orders, symbols, session, err := helpers.LoadHistory(ctx, c, days)
-	if err != nil {
-		return nil, err
-	}
-	positions := builders.BuildFXPositions(deals, orders, symbols, session)
-	if withMAE {
-		helpers.EnrichFXMAEMFE(ctx, c, positions, symbols)
-	}
-	cutoff := helpers.CutoffFromDays(days)
-	if cutoff != nil {
-		filtered := positions[:0]
-		for _, pos := range positions {
-			if pos.ClosedAt != nil && !pos.ClosedAt.Before(*cutoff) {
-				filtered = append(filtered, pos)
-			}
-		}
-		positions = filtered
-	}
-	return positions, nil
+	return reconstructor.ReconstructClosedPositions(context.Background(), newClient(client, cfg), days, reconstructor.WithExcursions)
 }
 
 func GetClosedPositionByExactMatch(
@@ -121,7 +89,7 @@ func GetBalanceSnapshots(
 ) ([]domain.UserBalanceSnapshot, error) {
 	// BalanceInit is absolute per position (from the deal's balance), so
 	// only positions closed inside the window are needed, and no candles.
-	positions, err := buildPositions(client, cfg, days, false)
+	positions, err := reconstructor.ReconstructClosedPositions(context.Background(), newClient(client, cfg), days, reconstructor.PositionsOnly)
 	if err != nil {
 		return nil, err
 	}

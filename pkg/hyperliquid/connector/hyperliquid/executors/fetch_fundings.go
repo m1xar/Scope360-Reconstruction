@@ -1,13 +1,19 @@
 package executors
 
 import (
-	"fmt"
 	"sort"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/hyperliquid"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
 )
+
+type fundingKey struct {
+	time int64
+	hash string
+	coin string
+	usdc string
+}
 
 // FetchAllFunding pages userFunding from startTime to now. The endpoint caps
 // a response, so pages advance by the newest time seen until nothing new
@@ -20,7 +26,7 @@ func FetchAllFunding(
 ) ([]models.FundingHistoryItem, error) {
 	var (
 		result []models.FundingHistoryItem
-		seen   = make(map[string]struct{})
+		seen   = make(map[fundingKey]struct{})
 		cursor = startTime
 	)
 
@@ -41,7 +47,7 @@ func FetchAllFunding(
 		maxTime := cursor
 		newAdded := 0
 		for _, item := range page {
-			key := fmt.Sprintf("%d|%s|%s|%s", item.Time, item.Hash, item.Delta.Coin, item.Delta.USDC)
+			key := fundingKey{item.Time, item.Hash, item.Delta.Coin, item.Delta.USDC}
 			if _, ok := seen[key]; ok {
 				continue
 			}

@@ -28,8 +28,8 @@ func FetchUserTradesWindow(client *resty.Client, symbol string, startMs, endMs i
 	for cursor <= endMs {
 		params := map[string]string{
 			"symbol":    symbol,
-			"startTime": fmt.Sprint(cursor),
-			"endTime":   fmt.Sprint(endMs),
+			"startTime": fmt.Sprintf("%d", cursor),
+			"endTime":   fmt.Sprintf("%d", endMs),
 			"limit":     fmt.Sprintf("%d", tradesPageLimit),
 		}
 
@@ -105,7 +105,7 @@ func FetchAllUserTrades(client *resty.Client, symbol string) ([]models.Trade, er
 		page, err := doWithRateLimit(func() ([]models.Trade, error) {
 			return binance.DoGet[[]models.Trade](client, userTradesPath, map[string]string{
 				"symbol": symbol,
-				"fromId": fmt.Sprint(fromID),
+				"fromId": fmt.Sprintf("%d", fromID),
 				"limit":  fmt.Sprintf("%d", tradesPageLimit),
 			}, 5)
 		})

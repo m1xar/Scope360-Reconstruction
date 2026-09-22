@@ -13,6 +13,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
 const defaultTimeout = 20 * time.Second
@@ -149,11 +150,7 @@ func GetFundings(
 		client = newDefaultClient()
 	}
 
-	startMs := int64(0)
-	if cutoff := helpers.CutoffFromDays(days); cutoff != nil {
-		startMs = cutoff.UnixMilli()
-	}
-	rawFundings, err := executors.FetchAllFunding(client, endpoint, user, startMs)
+	rawFundings, err := executors.FetchAllFunding(client, endpoint, user, window.StartMs(helpers.CutoffFromDays(days)))
 	if err != nil {
 		return nil, err
 	}

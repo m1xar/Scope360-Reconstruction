@@ -43,7 +43,8 @@ func TestWalkEarlierStopsAtOpeningFill(t *testing.T) {
 	}
 
 	var calls int
-	earlier, segments, err := walkEarlier(serve(all, &calls), seg, cutoff-1, now-365*dayMs)
+	var synth int64
+	earlier, segments, err := walkEarlier(serve(all, &calls), seg, cutoff-1, now-365*dayMs, &synth)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +63,8 @@ func TestWalkEarlierStopsAtOpeningFill(t *testing.T) {
 
 func TestWalkEarlierNoopWhenFlat(t *testing.T) {
 	var calls int
-	earlier, segments, err := walkEarlier(serve(nil, &calls), helpers.NewFillSegmenter(), 1000, 0)
+	var synth int64
+	earlier, segments, err := walkEarlier(serve(nil, &calls), helpers.NewFillSegmenter(), 1000, 0, &synth)
 	if err != nil || earlier != nil || segments != nil || calls != 0 {
 		t.Fatalf("earlier=%v segments=%v calls=%d err=%v", earlier, segments, calls, err)
 	}

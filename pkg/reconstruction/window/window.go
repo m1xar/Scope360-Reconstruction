@@ -2,11 +2,14 @@
 // history from the newest records to the oldest.
 package window
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 const (
-	Day       = 24 * time.Hour
-	Retention = 3 * 365 * Day
+	day       = 24 * time.Hour
+	Retention = 3 * 365 * day
 )
 
 type Span struct {
@@ -31,8 +34,17 @@ func Backward(endMs, floorMs, spanMs int64) []Span {
 	return spans
 }
 
-// DaysSince returns the days window that reaches back to t (with a day of
-// slack), for lookups of a position known to have opened at t.
+// DaysSince returns the days window that reaches back to t plus one day of
+// slack, for lookups of a position known to have opened at t.
 func DaysSince(t time.Time) int {
-	return int(time.Since(t).Hours()/24) + 2
+	return int(math.Ceil(time.Since(t).Hours()/24)) + 1
+}
+
+// StartMs converts an optional cutoff into the millisecond start used by
+// the exchange fetchers, where 0 means unbounded.
+func StartMs(cutoff *time.Time) int64 {
+	if cutoff == nil {
+		return 0
+	}
+	return cutoff.UnixMilli()
 }

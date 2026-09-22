@@ -43,12 +43,7 @@ type FillSegmenter struct {
 // Resolved() stays false until each of them has been walked back to zero,
 // even for a symbol that has not produced a fill yet.
 func NewFillSegmenter(openPositions []models.OpenPosition) *FillSegmenter {
-	seeds := SeedFromOpenPositions(openPositions)
-	walker := reverse.NewWalker[models.Fill](reverse.SeedFromMap(seeds))
-	for symbol, size := range seeds {
-		walker.Seed(symbol, size)
-	}
-	return &FillSegmenter{walker: walker}
+	return &FillSegmenter{walker: reverse.NewSeededWalker[models.Fill](SeedFromOpenPositions(openPositions))}
 }
 
 func (s *FillSegmenter) PushOlderBatch(fills []models.Fill) [][]models.Fill {
@@ -82,7 +77,7 @@ func (s *FillSegmenter) Resolved() bool {
 // OpenFills returns, per symbol and oldest first, the fills that belong to
 // the seeded open positions.
 func (s *FillSegmenter) OpenFills() map[string][]models.Fill {
-	return s.walker.Pending()
+	return s.walker.OpenFills()
 }
 
 func sortFillsDescending(fills []models.Fill) {

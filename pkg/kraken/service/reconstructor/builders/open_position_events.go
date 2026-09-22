@@ -43,7 +43,7 @@ func BuildOpenOrdersFromEvents(events []models.PositionUpdate, positionID uuid.U
 			side = "SELL"
 		}
 		price := helpers.Round8(upd.ExecutionPrice.Float64())
-		at := time.UnixMilli(eventTimeMs(upd)).UTC()
+		at := EventTime(upd)
 		amount = helpers.Round8(amount)
 
 		out = append(out, domain.Order{
@@ -72,9 +72,12 @@ func BuildOpenOrdersFromEvents(events []models.PositionUpdate, positionID uuid.U
 	return out
 }
 
-func eventTimeMs(upd models.PositionUpdate) int64 {
-	if upd.FillTime != 0 {
-		return upd.FillTime
+// EventTime is when the update happened: the fill time, or the event's own
+// timestamp for updates that are not executions.
+func EventTime(upd models.PositionUpdate) time.Time {
+	ms := upd.FillTime
+	if ms == 0 {
+		ms = upd.Timestamp
 	}
-	return upd.Timestamp
+	return time.UnixMilli(ms).UTC()
 }

@@ -53,54 +53,15 @@ func CollectClosedEpisodes(
 		segmenter = helpers.NewFillSegmenter(openPositions)
 		walk      FillWalk
 		pages     [][]models.Fill
-		floor     = time.Now().Add(-maxFillLookback)
-		seen      = make(map[string]struct{})
-		cursor    string
 	)
 
-	for {
-		page, err := executors.FetchFills(client, cursor)
-		if err != nil {
-			return FillWalk{}, err
-		}
-		if len(page) == 0 {
-			break
-		}
-
-		fresh := make([]models.Fill, 0, len(page))
-		oldest := time.Time{}
-		for _, fill := range page {
-			at, err := helpers.ParseTime(fill.FillTime)
-			if err != nil {
-				continue
-			}
-			if oldest.IsZero() || at.Before(oldest) {
-				oldest = at
-			}
-
-			key := builderFillKey(fill)
-			if _, ok := seen[key]; ok {
-				continue
-			}
-			seen[key] = struct{}{}
-			fresh = append(fresh, fill)
-		}
-
-		if len(fresh) > 0 {
-			pages = append(pages, fresh)
-			walk.Groups = append(walk.Groups, segmenter.PushOlderBatch(fresh)...)
-		}
-
-		if oldest.IsZero() || len(fresh) == 0 || len(page) < executors.FillsPageSize {
-			break
-		}
-		if oldest.Before(floor) {
-			break
-		}
-		if cutoff != nil && oldest.Before(*cutoff) && segmenter.Flat() {
-			break
-		}
-		cursor = executors.FormatKrakenTime(oldest)
+	err = walkFillsBack(client, func(fresh []models.Fill, oldest time.Time) bool {
+		pages = append(pages, fresh)
+		walk.Groups = append(walk.Groups, segmenter.PushOlderBatch(fresh)...)
+		return cutoff != nil && oldest.Before(*cutoff) && segmenter.Flat()
+	})
+	if err != nil {
+		return FillWalk{}, err
 	}
 
 	for i := len(pages) - 1; i >= 0; i-- {
@@ -115,6 +76,51 @@ func CollectClosedEpisodes(
 		return ti.Before(tj)
 	})
 	return walk, nil
+}
+
+// walkFillsBack pages the fill history newest first, handing each page's
+// unseen fills and its oldest fill time to visit, until visit asks to stop,
+// the history is exhausted or the lookback floor is reached.
+func walkFillsBack(client *resty.Client, visit func(fresh []models.Fill, oldest time.Time) (stop bool)) error {
+	var (
+		floor  = time.Now().Add(-maxFillLookback)
+		seen   = make(map[string]struct{})
+		cursor string
+	)
+	for {
+		page, err := executors.FetchFills(client, cursor)
+		if err != nil {
+			return err
+		}
+		if len(page) == 0 {
+			return nil
+		}
+
+		fresh := make([]models.Fill, 0, len(page))
+		oldest := time.Time{}
+		for _, fill := range page {
+			at, err := helpers.ParseTime(fill.FillTime)
+			if err != nil {
+				continue
+			}
+			if oldest.IsZero() || at.Before(oldest) {
+				oldest = at
+			}
+			key := builderFillKey(fill)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			fresh = append(fresh, fill)
+		}
+		if oldest.IsZero() || len(fresh) == 0 {
+			return nil
+		}
+		if visit(fresh, oldest) || len(page) < executors.FillsPageSize || oldest.Before(floor) {
+			return nil
+		}
+		cursor = executors.FormatKrakenTime(oldest)
+	}
 }
 
 func builderFillKey(fill models.Fill) string {
@@ -237,33 +243,35 @@ func EnrichOpenPositionOrders(
 		posIdx++
 
 		symbol := strings.ToUpper(strings.TrimSpace(rawPos.Symbol))
-		events, err := CollectOpenEvents(client, symbol)
-		if err == nil && len(events) > 0 {
+		if events, err := collectOpenEvents(client, symbol); err == nil && len(events) > 0 {
 			pos.Orders = builders.BuildOpenOrdersFromEvents(events, pos.ID)
-			if openedAt := time.UnixMilli(eventMs(events[0])).UTC(); pos.OpenTime.IsZero() || pos.OpenTime.Year() < 2000 {
-				pos.OpenTime = openedAt
+			if pos.OpenTime.Unix() <= 0 {
+				pos.OpenTime = builders.EventTime(events[0])
 			}
 			continue
 		}
 
 		if openFills == nil {
-			openFills, err = CollectOpenFills(client, raw)
+			fills, err := collectOpenFills(client, raw)
 			if err != nil {
 				return
 			}
+			openFills = fills
 		}
 		pos.Orders = builders.BuildOpenOrdersFromFills(openFills[symbol], pos.ID)
 	}
 }
 
 // openEventsMaxPages caps the walk back through a symbol's position events
-// (1000 per page, one per hour of funding while a position is open).
+// (1000 per page; funding adds one event per hour while a position is open,
+// so 30 pages cover well over three years).
 const openEventsMaxPages = 30
 
-// CollectOpenEvents returns the execution events of the current position on
+// collectOpenEvents returns the execution events of the current position on
 // symbol, oldest first, starting with the event that opened it (from flat
-// or by flipping through zero). Nil when no opening event was found.
-func CollectOpenEvents(client *resty.Client, symbol string) ([]models.PositionUpdate, error) {
+// or by flipping through zero). Nil when no opening event was found within
+// openEventsMaxPages.
+func collectOpenEvents(client *resty.Client, symbol string) ([]models.PositionUpdate, error) {
 	var collected []models.PositionUpdate
 	continuation := ""
 	for page := 0; page < openEventsMaxPages; page++ {
@@ -294,59 +302,20 @@ func CollectOpenEvents(client *resty.Client, symbol string) ([]models.PositionUp
 	return nil, nil
 }
 
-func eventMs(upd models.PositionUpdate) int64 {
-	if upd.FillTime != 0 {
-		return upd.FillTime
-	}
-	return upd.Timestamp
-}
-
-// CollectOpenFills pages fills newest first until the walker seeded with the
+// collectOpenFills pages fills newest first until the walker seeded with the
 // open positions is resolved (or the lookback floor is hit) and returns the
 // fills of each open position, oldest first, keyed by symbol.
-func CollectOpenFills(client *resty.Client, openPositions []models.OpenPosition) (map[string][]models.Fill, error) {
+func collectOpenFills(client *resty.Client, openPositions []models.OpenPosition) (map[string][]models.Fill, error) {
 	segmenter := helpers.NewFillSegmenter(openPositions)
 	if segmenter.Resolved() {
 		return map[string][]models.Fill{}, nil
 	}
-
-	var (
-		floor  = time.Now().Add(-maxFillLookback)
-		seen   = make(map[string]struct{})
-		cursor string
-	)
-	for {
-		page, err := executors.FetchFills(client, cursor)
-		if err != nil {
-			return nil, err
-		}
-		if len(page) == 0 {
-			break
-		}
-
-		fresh := make([]models.Fill, 0, len(page))
-		oldest := time.Time{}
-		for _, fill := range page {
-			at, err := helpers.ParseTime(fill.FillTime)
-			if err != nil {
-				continue
-			}
-			if oldest.IsZero() || at.Before(oldest) {
-				oldest = at
-			}
-			key := builderFillKey(fill)
-			if _, ok := seen[key]; ok {
-				continue
-			}
-			seen[key] = struct{}{}
-			fresh = append(fresh, fill)
-		}
+	err := walkFillsBack(client, func(fresh []models.Fill, _ time.Time) bool {
 		segmenter.PushOlderBatch(fresh)
-
-		if segmenter.Resolved() || oldest.IsZero() || len(fresh) == 0 || len(page) < executors.FillsPageSize || oldest.Before(floor) {
-			break
-		}
-		cursor = executors.FormatKrakenTime(oldest)
+		return segmenter.Resolved()
+	})
+	if err != nil {
+		return nil, err
 	}
 	return segmenter.OpenFills(), nil
 }

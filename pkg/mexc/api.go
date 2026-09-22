@@ -148,7 +148,7 @@ func GetTransactions(
 ) ([]domain.Transaction, error) {
 	mexcclient.AttachAuth(client, creds)
 
-	transfers, err := executors.FetchAllTransferRecords(client, cutoffMsFromDays(days))
+	transfers, err := executors.FetchAllTransferRecords(client, window.StartMs(helpers.CutoffFromDays(days)))
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +174,7 @@ func GetFundings(
 ) ([]domain.UserFunding, error) {
 	mexcclient.AttachAuth(client, creds)
 
-	records, err := executors.FetchAllFundingRecords(client, cutoffMsFromDays(days))
+	records, err := executors.FetchAllFundingRecords(client, window.StartMs(helpers.CutoffFromDays(days)))
 	if err != nil {
 		return nil, err
 	}
@@ -214,11 +214,4 @@ func GetCandles(
 		client, symbol, interval,
 		startTime.UnixMilli(), endTime.UnixMilli(),
 	)
-}
-
-func cutoffMsFromDays(days int) int64 {
-	if cutoff := helpers.CutoffFromDays(days); cutoff != nil {
-		return cutoff.UnixMilli()
-	}
-	return 0
 }

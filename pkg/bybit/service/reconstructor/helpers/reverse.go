@@ -24,20 +24,18 @@ func SeedFromOpenPositions(positions []models.Position) map[string]float64 {
 }
 
 type FillSegmenter struct {
-	walker   *reverse.Walker[Fill]
-	position map[string]float64
+	walker *reverse.Walker[Fill]
 }
 
+// NewFillSegmenter seeds the walker with the live open positions up front, so
+// Resolved() stays false until each of them has been walked back to zero.
 func NewFillSegmenter(openPositions []models.Position) *FillSegmenter {
-	seed := SeedFromOpenPositions(openPositions)
-	position := make(map[string]float64, len(seed))
-	for k, v := range seed {
-		position[k] = v
+	seeds := SeedFromOpenPositions(openPositions)
+	walker := reverse.NewWalker[Fill](reverse.SeedFromMap(seeds))
+	for key, size := range seeds {
+		walker.Seed(key, size)
 	}
-	return &FillSegmenter{
-		walker:   reverse.NewWalker[Fill](reverse.SeedFromMap(seed)),
-		position: position,
-	}
+	return &FillSegmenter{walker: walker}
 }
 
 func (s *FillSegmenter) PushOlderBatch(fills []Fill) [][]Fill {
@@ -51,14 +49,7 @@ func (s *FillSegmenter) PushOlderBatch(fills []Fill) [][]Fill {
 		if delta == 0 {
 			continue
 		}
-		key := fill.Key()
-		before := s.position[key] - delta
-		if math.Abs(before) < reverse.DefaultEpsilon {
-			before = 0
-		}
-		s.position[key] = before
-
-		if group, ok := s.walker.Push(key, delta, fill); ok {
+		if group, ok := s.walker.Push(fill.Key(), delta, fill); ok {
 			groups = append(groups, group.Fills)
 		}
 	}
@@ -69,11 +60,8 @@ func (s *FillSegmenter) Flat() bool {
 	return s.walker.Flat()
 }
 
+// Resolved reports whether every seeded open position has been walked back
+// to its opening fill.
 func (s *FillSegmenter) Resolved() bool {
-	for _, size := range s.position {
-		if size != 0 {
-			return false
-		}
-	}
-	return s.walker.Flat()
+	return s.walker.Resolved()
 }

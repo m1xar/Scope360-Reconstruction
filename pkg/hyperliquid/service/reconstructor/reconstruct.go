@@ -145,14 +145,15 @@ func CollectEpisodes(
 	if err != nil {
 		return FillWalk{}, err
 	}
-	recent = helpers.NormalizeFills(recent)
+	var synthTid int64
+	recent = renumberSyntheticTids(helpers.NormalizeFills(recent), &synthTid)
 	walk.Segments = append(walk.Segments, segmenter.PushOlderBatch(recent)...)
 	walk.Fills = recent
 
 	fetch := func(startMs, endMs int64) ([]models.RawFill, error) {
 		return executors.FetchFillsRange(client, endpoint, user, startMs, endMs)
 	}
-	earlier, segments, err := walkEarlier(fetch, segmenter, cutoffMs-1, time.Now().UnixMilli()-window.Retention.Milliseconds())
+	earlier, segments, err := walkEarlier(fetch, segmenter, cutoffMs-1, time.Now().UnixMilli()-window.Retention.Milliseconds(), &synthTid)
 	if err != nil {
 		return FillWalk{}, err
 	}
@@ -175,11 +176,11 @@ func walkEarlier(
 	fetch func(startMs, endMs int64) ([]models.RawFill, error),
 	segmenter *helpers.FillSegmenter,
 	endMs, floorMs int64,
+	synthTid *int64,
 ) ([]models.RawFill, [][]models.RawFill, error) {
 	var (
 		earlier  []models.RawFill
 		segments [][]models.RawFill
-		synthTid int64
 	)
 	for _, span := range window.Backward(endMs, floorMs, earlierFillsWindow.Milliseconds()) {
 		if segmenter.Flat() {
@@ -189,19 +190,23 @@ func walkEarlier(
 		if err != nil {
 			return nil, nil, err
 		}
-		fills = helpers.NormalizeFills(fills)
-		// NormalizeFills numbers synthetic tids from -1 on every call; keep
-		// them unique across windows.
-		for i := range fills {
-			if fills[i].Tid < 0 {
-				synthTid--
-				fills[i].Tid = synthTid
-			}
-		}
+		fills = renumberSyntheticTids(helpers.NormalizeFills(fills), synthTid)
 		segments = append(segments, segmenter.PushOlderBatch(fills)...)
 		earlier = append(fills, earlier...)
 	}
 	return earlier, segments, nil
+}
+
+// renumberSyntheticTids keeps the synthetic (negative) tids that
+// NormalizeFills assigns from -1 on every call unique across batches.
+func renumberSyntheticTids(fills []models.RawFill, next *int64) []models.RawFill {
+	for i := range fills {
+		if fills[i].Tid < 0 {
+			*next--
+			fills[i].Tid = *next
+		}
+	}
+	return fills
 }
 
 func FillsSince(

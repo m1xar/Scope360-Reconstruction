@@ -13,6 +13,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/workers"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
 const defaultCandleWorkers = 4
@@ -27,11 +28,7 @@ func ReconstructClosedPositions(
 	baseURL string,
 	days int,
 ) ([]domain.Position, error) {
-	cutoff := helpers.CutoffFromDays(days)
-	sinceMs := int64(0)
-	if cutoff != nil {
-		sinceMs = cutoff.UnixMilli()
-	}
+	sinceMs := window.StartMs(helpers.CutoffFromDays(days))
 
 	closedPositions, err := executors.FetchAllClosedPositions(client, baseURL, sinceMs)
 	if err != nil {

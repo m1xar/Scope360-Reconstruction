@@ -3,7 +3,7 @@ package reverse
 import "testing"
 
 func TestResolvedAndPending(t *testing.T) {
-	w := NewWalker[string](SeedFromMap(map[string]float64{"BTC": 2}))
+	w := NewSeededWalker[string](map[string]float64{"BTC": 2})
 
 	// Newest first: a close of an older episode, then the two opening fills
 	// of the current position.
@@ -19,7 +19,7 @@ func TestResolvedAndPending(t *testing.T) {
 	if !w.Resolved() {
 		t.Fatal("expected resolved once the seeded size is walked back to zero")
 	}
-	if got := w.Pending()["BTC"]; len(got) != 2 || got[0] != "open-a" || got[1] != "open-b" {
+	if got := w.OpenFills()["BTC"]; len(got) != 2 || got[0] != "open-a" || got[1] != "open-b" {
 		t.Fatalf("pending = %v, want [open-a open-b]", got)
 	}
 
@@ -30,7 +30,7 @@ func TestResolvedAndPending(t *testing.T) {
 	if !ok || len(g.Fills) != 2 || g.Fills[0] != "open" {
 		t.Fatalf("group = %+v ok=%v", g, ok)
 	}
-	if !w2.Resolved() || len(w2.Pending()) != 0 {
+	if !w2.Resolved() || len(w2.OpenFills()) != 0 {
 		t.Fatal("expected resolved with nothing pending")
 	}
 }

@@ -175,10 +175,7 @@ func walkSymbolFills(
 ) (symbolWalk, error) {
 	segmenter := helpers.NewFillSegmenter(ownPositions(openPositions, symbol))
 
-	cutoffMs := int64(0)
-	if cutoff != nil {
-		cutoffMs = cutoff.UnixMilli()
-	}
+	cutoffMs := window.StartMs(cutoff)
 
 	var walk symbolWalk
 	now := time.Now().UnixMilli()
@@ -240,6 +237,8 @@ func collectWalks(
 		if first == nil {
 			return []symbolWalk{{}}, nil
 		}
+		// window.Backward covers (floor, end], so the floor sits just before
+		// the first trade.
 		walk, err := walkSymbolFills(func(startMs, endMs int64) ([]models.Trade, error) {
 			return executors.FetchUserTradesWindow(client, symbol, startMs, endMs)
 		}, symbol, openPositions, cutoff, untilResolved, first.Time-1)
@@ -251,17 +250,22 @@ func collectWalks(
 }
 
 // normalizeGroupFees converts non-stable commissions of every fill in groups
-// in one pass (the converter caches klines across symbols).
+// in one pass (the converter caches klines across symbols). Trade ids are
+// only unique per symbol, so fills are written back by (symbol, id).
 func normalizeGroupFees(client *resty.Client, groups [][]models.Trade) {
 	flat := groupFills(groups)
 	helpers.NormalizeFees(client, flat)
-	byID := make(map[int64]models.Trade, len(flat))
+	type tradeKey struct {
+		symbol string
+		id     int64
+	}
+	normalized := make(map[tradeKey]models.Trade, len(flat))
 	for _, f := range flat {
-		byID[f.ID] = f
+		normalized[tradeKey{f.Symbol, f.ID}] = f
 	}
 	for _, g := range groups {
 		for i := range g {
-			g[i] = byID[g[i].ID]
+			g[i] = normalized[tradeKey{g[i].Symbol, g[i].ID}]
 		}
 	}
 }
@@ -375,10 +379,7 @@ func ReconstructClosedPositions(
 	// Any position closed after the cutoff left REALIZED_PNL/COMMISSION
 	// income after it, so income from the cutoff is enough to find the
 	// symbols to walk. cutoff == nil keeps the full retention.
-	ledgerStartMs := int64(0)
-	if cutoff != nil {
-		ledgerStartMs = cutoff.UnixMilli()
-	}
+	ledgerStartMs := window.StartMs(cutoff)
 	ledger, err := LoadLedger(client, ledgerStartMs)
 	if err != nil {
 		return nil, err
@@ -413,6 +414,8 @@ func ReconstructClosedPositions(
 			}
 		}
 		if earliestMs < ledgerStartMs {
+			// Income is fetched with inclusive bounds: stop just before the
+			// range the ledger already holds.
 			earlier, err := executors.FetchAllIncome(client, earliestMs, ledgerStartMs-1, "")
 			if err != nil {
 				return nil, err

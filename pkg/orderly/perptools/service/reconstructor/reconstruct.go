@@ -14,6 +14,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/orderly/perptools/service/reconstructor/envelope"
 	"github.com/m1xar/scope360-reconstruction/pkg/orderly/perptools/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/orderly/perptools/service/reconstructor/workers"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
 const (
@@ -273,11 +274,7 @@ func BalanceSnapshots(
 	}
 
 	windowStart := helpers.BalanceWindowStart(positions, cutoff)
-	historyStartMs := int64(0)
-	if windowStart != nil {
-		historyStartMs = windowStart.UnixMilli()
-	}
-	assetHistory, err := executors.FetchAssetHistory(c, historyStartMs, 0)
+	assetHistory, err := executors.FetchAssetHistory(c, window.StartMs(windowStart), 0)
 	if err != nil {
 		return nil, err
 	}

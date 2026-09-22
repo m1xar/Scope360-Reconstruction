@@ -45,12 +45,7 @@ type FillSegmenter struct {
 // Resolved() is false until every one of them has been walked back to zero,
 // even for a symbol that has not produced a fill yet.
 func NewFillSegmenter(openPositions []models.PositionRisk) *FillSegmenter {
-	seeds := SeedFromOpenPositions(openPositions)
-	walker := reverse.NewWalker[models.Trade](reverse.SeedFromMap(seeds))
-	for key, size := range seeds {
-		walker.Seed(key, size)
-	}
-	return &FillSegmenter{walker: walker}
+	return &FillSegmenter{walker: reverse.NewSeededWalker[models.Trade](SeedFromOpenPositions(openPositions))}
 }
 
 func (s *FillSegmenter) PushOlderBatch(fills []models.Trade) [][]models.Trade {
@@ -90,7 +85,7 @@ func (s *FillSegmenter) Resolved() bool {
 // positions.
 func (s *FillSegmenter) OpenFills() []models.Trade {
 	var out []models.Trade
-	for _, fills := range s.walker.Pending() {
+	for _, fills := range s.walker.OpenFills() {
 		out = append(out, fills...)
 	}
 	sort.SliceStable(out, func(i, j int) bool {

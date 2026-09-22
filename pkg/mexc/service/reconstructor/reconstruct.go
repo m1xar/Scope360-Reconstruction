@@ -12,16 +12,13 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/service/reconstructor/workers"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
 const defaultCandleWorkers = 4
 
 func ReconstructClosedPositions(client *resty.Client, cutoff *time.Time) ([]domain.Position, error) {
-	cutoffMs := int64(0)
-	if cutoff != nil {
-		cutoffMs = cutoff.UnixMilli()
-	}
-	closedPositions, err := executors.FetchAllHistoryPositions(client, cutoffMs)
+	closedPositions, err := executors.FetchAllHistoryPositions(client, window.StartMs(cutoff))
 	if err != nil {
 		return nil, err
 	}
@@ -195,11 +192,7 @@ func BalanceSnapshots(
 	}
 
 	windowStart := helpers.BalanceWindowStart(positions, cutoff)
-	transfersSinceMs := int64(0)
-	if windowStart != nil {
-		transfersSinceMs = windowStart.UnixMilli()
-	}
-	transfers, err := executors.FetchAllTransferRecords(client, transfersSinceMs)
+	transfers, err := executors.FetchAllTransferRecords(client, window.StartMs(windowStart))
 	if err != nil {
 		return nil, err
 	}

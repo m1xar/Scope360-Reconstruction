@@ -137,3 +137,15 @@ func TestWalkStopsAtSymbolFloor(t *testing.T) {
 		t.Errorf("windows = %d, want 3 (20 days in 7-day windows)", windows)
 	}
 }
+
+func TestNormalizeGroupFeesKeepsSymbolsApart(t *testing.T) {
+	// Trade ids repeat across symbols; the write-back must not swap fills.
+	groups := [][]models.Trade{
+		{{Symbol: "BTCUSDT", ID: 1, Commission: "0.1", CommissionAsset: "USDT"}},
+		{{Symbol: "ETHUSDT", ID: 1, Commission: "0.2", CommissionAsset: "USDT"}},
+	}
+	normalizeGroupFees(nil, groups)
+	if groups[0][0].Symbol != "BTCUSDT" || groups[0][0].Commission != "0.1" || groups[1][0].Symbol != "ETHUSDT" {
+		t.Fatalf("groups after normalisation: %+v", groups)
+	}
+}
