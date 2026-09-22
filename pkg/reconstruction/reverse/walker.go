@@ -14,6 +14,7 @@ type Walker[T any] struct {
 	seed        func(key string) float64
 	position    map[string]float64
 	pending     map[string][]T
+	opened      map[string][]T
 	startedFlat map[string]bool
 }
 
@@ -26,6 +27,7 @@ func NewWalker[T any](seed func(key string) float64) *Walker[T] {
 		seed:        seed,
 		position:    make(map[string]float64),
 		pending:     make(map[string][]T),
+		opened:      make(map[string][]T),
 		startedFlat: make(map[string]bool),
 	}
 }
@@ -72,12 +74,15 @@ func (w *Walker[T]) Push(key string, delta float64, fill T) (Group[T], bool) {
 	fills := w.pending[key]
 	w.pending[key] = nil
 
-	if !w.startedFlat[key] {
-		return Group[T]{}, false
-	}
-
 	for i, j := 0, len(fills)-1; i < j; i, j = i+1, j-1 {
 		fills[i], fills[j] = fills[j], fills[i]
+	}
+
+	if !w.startedFlat[key] {
+		// These fills walked a seeded (still open) position back to zero:
+		// they are the fills that opened it.
+		w.opened[key] = append(fills, w.opened[key]...)
+		return Group[T]{}, false
 	}
 	return Group[T]{Key: key, Fills: fills}, true
 }
@@ -89,4 +94,38 @@ func (w *Walker[T]) Flat() bool {
 		}
 	}
 	return true
+}
+
+// Resolved reports whether every seeded position has been walked back to zero
+// and no fills are pending: the walk has reached the opening fill of each
+// currently open position.
+func (w *Walker[T]) Resolved() bool {
+	for _, pos := range w.position {
+		if pos != 0 {
+			return false
+		}
+	}
+	return w.Flat()
+}
+
+// Pending returns, oldest first, the fills that belong to the seeded (open)
+// positions: those that walked them back to zero plus any still buffered.
+// After a resolved walk these are exactly the opening fills of every open
+// position.
+func (w *Walker[T]) Pending() map[string][]T {
+	out := make(map[string][]T, len(w.pending)+len(w.opened))
+	for key, fills := range w.opened {
+		out[key] = append([]T(nil), fills...)
+	}
+	for key, fills := range w.pending {
+		if len(fills) == 0 {
+			continue
+		}
+		cp := make([]T, len(fills))
+		for i, f := range fills {
+			cp[len(fills)-1-i] = f
+		}
+		out[key] = append(out[key], cp...)
+	}
+	return out
 }
