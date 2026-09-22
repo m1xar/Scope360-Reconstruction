@@ -93,7 +93,11 @@ func Load(client *resty.Client, cutoff *time.Time, s scope.Scope) (*Dataset, err
 	if s.Has(scope.Closed) {
 		walkCutoff = cutoff
 	}
-	walk, err := CollectWeeks(client, d.open, walkCutoff, s.Has(scope.Open))
+	// Without a cutoff the closed walk covers the whole retention, opening
+	// fills included; otherwise it has to resolve the open positions past
+	// the cutoff.
+	untilResolved := s.Has(scope.Open) && !(s.Has(scope.Closed) && cutoff == nil)
+	walk, err := CollectWeeks(client, d.open, walkCutoff, untilResolved)
 	if err != nil {
 		return nil, err
 	}
