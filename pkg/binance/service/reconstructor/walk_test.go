@@ -149,3 +149,45 @@ func TestNormalizeGroupFeesKeepsSymbolsApart(t *testing.T) {
 		t.Fatalf("groups after normalisation: %+v", groups)
 	}
 }
+
+func TestWalkPastCutoffAlsoResolvesOpenPosition(t *testing.T) {
+	// Hedge mode: a LONG position opened 40 days ago and untouched since,
+	// plus a SHORT episode closed inside the window. The closed-only walk
+	// is flat right after the cutoff; with open positions wanted too it has
+	// to go on until the LONG's opening fill.
+	now := time.Now().UnixMilli()
+	hedge := func(id int64, side, posSide, qty string, atMs int64) models.Trade {
+		return models.Trade{Symbol: "BTCUSDT", ID: id, OrderID: id, Side: side, PositionSide: posSide, Qty: qty, Time: atMs}
+	}
+	all := []models.Trade{
+		hedge(1, "BUY", "LONG", "1", now-40*dayMs),
+		hedge(2, "SELL", "SHORT", "2", now-3*dayMs),
+		hedge(3, "BUY", "SHORT", "2", now-2*dayMs),
+	}
+	open := []models.PositionRisk{{Symbol: "BTCUSDT", PositionSide: "LONG", PositionAmt: "1"}}
+	cutoff := time.Now().Add(-7 * 24 * time.Hour)
+
+	var windows int
+	walk, err := walkSymbolFills(fetchFrom(all, &windows), "BTCUSDT", open, &cutoff, true, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(walk.groups) != 1 || len(walk.groups[0]) != 2 {
+		t.Fatalf("groups = %+v, want the closed SHORT episode", walk.groups)
+	}
+	if len(walk.openFills) != 1 || walk.openFills[0].ID != 1 {
+		t.Fatalf("openFills = %+v, want [1]", walk.openFills)
+	}
+	if windows < 6 {
+		t.Errorf("windows = %d, want at least 6 (40 days back to the opening fill)", windows)
+	}
+
+	windows = 0
+	walk, err = walkSymbolFills(fetchFrom(all, &windows), "BTCUSDT", open, &cutoff, false, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if windows != 2 || len(walk.groups) != 1 {
+		t.Errorf("closed-only walk: windows = %d, groups = %d; want 2 windows and the SHORT episode", windows, len(walk.groups))
+	}
+}
