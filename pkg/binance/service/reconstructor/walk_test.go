@@ -38,7 +38,7 @@ func TestWalkCompletesPositionStraddlingCutoff(t *testing.T) {
 	cutoff := time.Now().Add(-3 * 24 * time.Hour)
 
 	var windows int
-	walk, err := walkSymbolFills(fetchFrom(all, &windows), "BTCUSDT", nil, &cutoff, false)
+	walk, err := walkSymbolFills(fetchFrom(all, &windows), "BTCUSDT", nil, &cutoff, false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestWalkStopsRightAfterCutoffWhenFlat(t *testing.T) {
 	cutoff := time.Now().Add(-3 * 24 * time.Hour)
 
 	var windows int
-	walk, err := walkSymbolFills(fetchFrom(all, &windows), "BTCUSDT", nil, &cutoff, false)
+	walk, err := walkSymbolFills(fetchFrom(all, &windows), "BTCUSDT", nil, &cutoff, false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestWalkResolvesOpenPosition(t *testing.T) {
 	open := []models.PositionRisk{{Symbol: "BTCUSDT", PositionSide: "BOTH", PositionAmt: "2"}}
 
 	var windows int
-	walk, err := walkSymbolFills(fetchFrom(all, &windows), "BTCUSDT", open, nil, true)
+	walk, err := walkSymbolFills(fetchFrom(all, &windows), "BTCUSDT", open, nil, true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,11 +113,27 @@ func TestWalkKeepsGoingForUntouchedOpenPosition(t *testing.T) {
 	open := []models.PositionRisk{{Symbol: "BTCUSDT", PositionSide: "BOTH", PositionAmt: "1"}}
 
 	var windows int
-	walk, err := walkSymbolFills(fetchFrom(all, &windows), "BTCUSDT", open, nil, true)
+	walk, err := walkSymbolFills(fetchFrom(all, &windows), "BTCUSDT", open, nil, true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(walk.openFills) != 1 || walk.openFills[0].ID != 1 {
 		t.Fatalf("openFills = %+v, want [1]", walk.openFills)
+	}
+}
+
+func TestWalkStopsAtSymbolFloor(t *testing.T) {
+	// The open position cannot be resolved (its fills are missing); the
+	// walk must not go past the symbol's first trade.
+	now := time.Now().UnixMilli()
+	all := []models.Trade{trade(1, "SELL", "1", now-20*dayMs)}
+	open := []models.PositionRisk{{Symbol: "BTCUSDT", PositionSide: "BOTH", PositionAmt: "5"}}
+
+	var windows int
+	if _, err := walkSymbolFills(fetchFrom(all, &windows), "BTCUSDT", open, nil, true, now-20*dayMs-1); err != nil {
+		t.Fatal(err)
+	}
+	if windows != 3 {
+		t.Errorf("windows = %d, want 3 (20 days in 7-day windows)", windows)
 	}
 }

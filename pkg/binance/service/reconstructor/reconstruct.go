@@ -159,18 +159,19 @@ type symbolWalk struct {
 	openFills []models.Trade   // fills of the still-open positions
 }
 
-// walkSymbolFills walks a symbol's trades backwards in 7-day windows. With a
-// cutoff it stops once the window is past it and no episode is left half
-// walked, so positions that straddle the cutoff are still completed. With
-// untilResolved it stops as soon as every open position seeded from
-// openPositions has been walked back to its opening fill. Without either it
-// walks to the retention floor.
+// walkSymbolFills walks a symbol's trades backwards in 7-day windows down to
+// floorMs (the symbol's first trade). With a cutoff it stops once the window
+// is past it and no episode is left half walked, so positions that straddle
+// the cutoff are still completed. With untilResolved it stops as soon as
+// every open position seeded from openPositions has been walked back to its
+// opening fill.
 func walkSymbolFills(
 	fetch func(startMs, endMs int64) ([]models.Trade, error),
 	symbol string,
 	openPositions []models.PositionRisk,
 	cutoff *time.Time,
 	untilResolved bool,
+	floorMs int64,
 ) (symbolWalk, error) {
 	segmenter := helpers.NewFillSegmenter(ownPositions(openPositions, symbol))
 
@@ -181,7 +182,10 @@ func walkSymbolFills(
 
 	var walk symbolWalk
 	now := time.Now().UnixMilli()
-	for _, span := range window.Backward(now, now-window.Retention.Milliseconds(), executors.TradesWindowMax.Milliseconds()) {
+	if retentionFloor := now - window.Retention.Milliseconds(); floorMs < retentionFloor {
+		floorMs = retentionFloor
+	}
+	for _, span := range window.Backward(now, floorMs, executors.TradesWindowMax.Milliseconds()) {
 		if untilResolved && segmenter.Resolved() {
 			break
 		}
@@ -227,20 +231,18 @@ func collectWalks(
 			seg := helpers.NewFillSegmenter(ownPositions(openPositions, symbol))
 			return []symbolWalk{{groups: seg.PushOlderBatch(fills), openFills: seg.OpenFills()}}, nil
 		}
-		if untilResolved {
-			// An open position whose fills Binance no longer serves would
-			// otherwise be walked to the retention floor for nothing.
-			has, err := executors.HasUserTrades(client, symbol)
-			if err != nil {
-				return nil, err
-			}
-			if !has {
-				return []symbolWalk{{}}, nil
-			}
+		// The oldest trade bounds the walk: a symbol whose history has a gap
+		// (or none at all) would otherwise be walked to the retention floor.
+		first, err := executors.FirstUserTrade(client, symbol)
+		if err != nil {
+			return nil, err
+		}
+		if first == nil {
+			return []symbolWalk{{}}, nil
 		}
 		walk, err := walkSymbolFills(func(startMs, endMs int64) ([]models.Trade, error) {
 			return executors.FetchUserTradesWindow(client, symbol, startMs, endMs)
-		}, symbol, openPositions, cutoff, untilResolved)
+		}, symbol, openPositions, cutoff, untilResolved, first.Time-1)
 		if err != nil {
 			return nil, err
 		}

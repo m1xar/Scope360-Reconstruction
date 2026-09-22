@@ -75,19 +75,22 @@ func FetchUserTradesWindow(client *resty.Client, symbol string, startMs, endMs i
 	return result, nil
 }
 
-// HasUserTrades reports whether Binance has any trade history for symbol
-// (one request from id 0), so a walk over years of empty windows can be
-// skipped for positions whose fills are not available.
-func HasUserTrades(client *resty.Client, symbol string) (bool, error) {
+// FirstUserTrade returns the symbol's oldest trade (one request from id 0),
+// or nil when Binance has no trade history for it. Its time is the floor
+// for a backwards walk: nothing older can exist.
+func FirstUserTrade(client *resty.Client, symbol string) (*models.Trade, error) {
 	page, err := doWithRateLimit(func() ([]models.Trade, error) {
 		return binance.DoGet[[]models.Trade](client, userTradesPath, map[string]string{
 			"symbol": symbol, "fromId": "0", "limit": "1",
 		}, 5)
 	})
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	return len(page) > 0, nil
+	if len(page) == 0 {
+		return nil, nil
+	}
+	return &page[0], nil
 }
 
 // FetchAllUserTrades walks a symbol's entire trade history forward by id
