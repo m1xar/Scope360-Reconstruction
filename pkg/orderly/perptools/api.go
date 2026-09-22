@@ -107,7 +107,12 @@ func GetCurrentBalance(client *resty.Client, cfg connector.Config) (*float64, er
 func GetTransactions(client *resty.Client, cfg connector.Config, days int) ([]domain.Transaction, error) {
 	c := newClient(client, cfg)
 
-	assetHistory, err := executors.FetchAssetHistory(c)
+	cutoff := helpers.CutoffFromDays(days)
+	startMs := int64(0)
+	if cutoff != nil {
+		startMs = cutoff.UnixMilli()
+	}
+	assetHistory, err := executors.FetchAssetHistory(c, startMs, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +126,6 @@ func GetTransactions(client *resty.Client, cfg connector.Config, days int) ([]do
 	if err != nil {
 		return nil, err
 	}
-	cutoff := helpers.CutoffFromDays(days)
 	if cutoff != nil {
 		filtered := transactions[:0]
 		for _, tx := range transactions {

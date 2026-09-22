@@ -272,7 +272,12 @@ func BalanceSnapshots(
 		return nil, err
 	}
 
-	assetHistory, err := executors.FetchAssetHistory(c)
+	windowStart := helpers.BalanceWindowStart(positions, cutoff)
+	historyStartMs := int64(0)
+	if windowStart != nil {
+		historyStartMs = windowStart.UnixMilli()
+	}
+	assetHistory, err := executors.FetchAssetHistory(c, historyStartMs, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +292,7 @@ func BalanceSnapshots(
 		assetHistory,
 		positions,
 		markPrices,
-		helpers.BalanceWindowStart(positions, cutoff),
+		windowStart,
 	)
 }
 
@@ -296,12 +301,21 @@ func EnrichOpenPositionOrders(c *connector.Client, positions []domain.OpenPositi
 		return
 	}
 
-	trades, err := executors.FetchAllTrades(c, "", 0, 0)
+	// Trades before a position's OpenTime are discarded below, so the
+	// fetch only needs to reach back to the oldest open position.
+	startMs := int64(0)
+	for _, pos := range positions {
+		if ms := pos.OpenTime.UnixMilli(); ms > 0 && (startMs == 0 || ms < startMs) {
+			startMs = ms
+		}
+	}
+
+	trades, err := executors.FetchAllTrades(c, "", startMs, 0)
 	if err != nil {
 		return
 	}
 
-	orders, err := executors.FetchFilledOrders(c, "", 0, 0)
+	orders, err := executors.FetchFilledOrders(c, "", startMs, 0)
 	orderMap := map[int64]models.OrderlyOrder{}
 	if err == nil {
 		orderMap = helpers.BuildOrderMap(orders)
