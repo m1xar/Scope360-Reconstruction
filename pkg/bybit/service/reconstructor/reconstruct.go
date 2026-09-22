@@ -1,18 +1,16 @@
 package reconstructor
 
 import (
-	"sort"
 	"sync"
 	"time"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/m1xar/scope360-reconstruction/pkg/bybit/connector/bybit/executors"
 	"github.com/m1xar/scope360-reconstruction/pkg/bybit/connector/bybit/models"
-	"github.com/m1xar/scope360-reconstruction/pkg/bybit/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/bybit/service/reconstructor/envelope"
 	"github.com/m1xar/scope360-reconstruction/pkg/bybit/service/reconstructor/helpers"
-	"github.com/m1xar/scope360-reconstruction/pkg/bybit/service/reconstructor/workers"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/scope"
 )
 
 const (
@@ -101,7 +99,7 @@ func CollectWeeks(
 		// parallel chunks; past the cutoff the walk may stop after any
 		// week, so fetch one at a time instead of overshooting by a chunk.
 		chunk := weekChunk
-		if !untilResolved && cutoff != nil && windows[i].EndMs < cutoffMs {
+		if cutoff != nil && windows[i].EndMs < cutoffMs {
 			chunk = 1
 		}
 		batch := windows[i:min(i+chunk, len(windows))]
@@ -158,11 +156,18 @@ func CollectWeeks(
 			walk.Fills = append(walk.Fills, fills...)
 			walk.Groups = append(walk.Groups, segmenter.PushOlderBatch(fills)...)
 
-			if untilResolved && segmenter.Resolved() {
+			// With a cutoff the walk has to pass it and leave no episode half
+			// walked; with untilResolved it also has to reach the opening
+			// fill of every open position.
+			settled := segmenter.Flat()
+			if untilResolved {
+				settled = segmenter.Resolved()
+			}
+			if cutoff == nil && untilResolved && settled {
 				stop = true
 				break
 			}
-			if !untilResolved && cutoff != nil && week.window.StartMs < cutoffMs && segmenter.Flat() {
+			if cutoff != nil && week.window.StartMs < cutoffMs && settled {
 				stop = true
 				break
 			}
@@ -291,110 +296,25 @@ func buildEnvelope(
 	}
 }
 
-func BalanceSnapshots(
-	client *resty.Client,
-	ledger *helpers.Ledger,
-	windowStart *time.Time,
-) ([]domain.UserBalanceSnapshot, error) {
-	wallet, err := executors.FetchWalletBalance(client)
-	if err != nil {
-		return nil, err
-	}
-
-	if ledger == nil {
-		startMs := int64(0)
-		if windowStart != nil {
-			startMs = windowStart.UnixMilli()
-		}
-		rows, err := executors.FetchLedger(client, startMs, 0, executors.LedgerFilter{})
-		if err != nil {
-			return nil, err
-		}
-		ledger = helpers.BuildLedger(rows)
-	}
-
-	return builders.BuildBalanceSnapshots(executors.TotalWalletBalance(wallet), ledger, windowStart), nil
-}
-
+// ReconstructClosedPositions builds the positions closed after the cutoff
+// (the whole retention when cutoff is nil).
 func ReconstructClosedPositions(
 	client *resty.Client,
 	cutoff *time.Time,
 ) ([]domain.Position, error) {
-	info, err := executors.FetchAccountInfo(client)
+	d, err := Load(client, cutoff, scope.Closed)
 	if err != nil {
 		return nil, err
 	}
-	isolated := info.MarginMode == models.MarginModeIsolated
-
-	openPositions, err := executors.FetchOpenPositions(client)
-	if err != nil {
-		return nil, err
-	}
-
-	walk, err := CollectWeeks(client, openPositions, cutoff, false)
-	if err != nil {
-		return nil, err
-	}
-
-	groups := GroupsClosedAfter(walk.Groups, cutoff)
-	if len(groups) == 0 {
-		return []domain.Position{}, nil
-	}
-
-	ledger := helpers.BuildLedger(walk.Entries)
-
-	candleRequests := make(chan helpers.CandleRequest, defaultCandleWorkers)
-	workers.StartCandleWorkers(client, candleRequests, defaultCandleWorkers)
-
-	envelopes := make(chan envelope.PositionEnvelope)
-	positionsCh := make(chan domain.Position)
-
-	go func() {
-		ReconstructPositions(
-			groups,
-			helpers.IndexOrdersByID(walk.Orders),
-			helpers.GroupOrdersBySymbol(walk.Orders),
-			helpers.IndexClosedPnlByOrder(walk.Closed),
-			ledger,
-			isolated,
-			candleRequests,
-			envelopes,
-		)
-		close(envelopes)
-		close(candleRequests)
-	}()
-
-	workers.StartPositionBuilders(envelopes, positionsCh, defaultPositionWorkers)
-
-	positions := make([]domain.Position, 0)
-	for pos := range positionsCh {
-		positions = append(positions, pos)
-	}
-
-	sort.Slice(positions, func(i, j int) bool {
-		return positions[i].ClosedAt.Before(*positions[j].ClosedAt)
-	})
-
-	if snapshots, err := BalanceSnapshots(client, ledger, helpers.BalanceWindowStart(positions, cutoff)); err == nil {
-		helpers.AttachBalanceInit(&positions, snapshots)
-	}
-
-	return positions, nil
+	return d.ClosedPositions()
 }
 
+// ReconstructOpenPositions builds the open positions with their opening
+// orders.
 func ReconstructOpenPositions(client *resty.Client) ([]domain.OpenPosition, error) {
-	raw, err := executors.FetchOpenPositions(client)
+	d, err := Load(client, nil, scope.Open)
 	if err != nil {
 		return nil, err
 	}
-	if len(raw) == 0 {
-		return []domain.OpenPosition{}, nil
-	}
-
-	walk, err := CollectWeeks(client, raw, nil, true)
-	if err != nil {
-		return nil, err
-	}
-
-	return builders.BuildOpenPositions(raw, walk.Fills, helpers.IndexOrdersByID(walk.Orders)), nil
+	return d.OpenPositions()
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/kraken/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/kraken/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/kraken/service/reconstructor/workers"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/scope"
 )
 
 const maxFillLookback = 3 * 365 * 24 * time.Hour
@@ -40,22 +41,21 @@ func (w FillWalk) EarliestOpen() time.Time {
 	return earliest
 }
 
-func CollectClosedEpisodes(
+// collectClosedEpisodes walks the fills newest first, seeded with the open
+// positions, until the cutoff is passed and no episode is left half walked
+// (or the lookback floor is hit when cutoff is nil).
+func collectClosedEpisodes(
 	client *resty.Client,
+	openPositions []models.OpenPosition,
 	cutoff *time.Time,
 ) (FillWalk, error) {
-	openPositions, err := executors.FetchOpenPositions(client)
-	if err != nil {
-		return FillWalk{}, err
-	}
-
 	var (
 		segmenter = helpers.NewFillSegmenter(openPositions)
 		walk      FillWalk
 		pages     [][]models.Fill
 	)
 
-	err = walkFillsBack(client, func(fresh []models.Fill, oldest time.Time) bool {
+	err := walkFillsBack(client, func(fresh []models.Fill, oldest time.Time) bool {
 		pages = append(pages, fresh)
 		walk.Groups = append(walk.Groups, segmenter.PushOlderBatch(fresh)...)
 		return cutoff != nil && oldest.Before(*cutoff) && segmenter.Flat()
@@ -320,49 +320,15 @@ func collectOpenFills(client *resty.Client, openPositions []models.OpenPosition)
 	return segmenter.OpenFills(), nil
 }
 
+// ReconstructClosedPositions builds the positions closed after the cutoff
+// (the whole lookback when cutoff is nil).
 func ReconstructClosedPositions(
 	client *resty.Client,
 	cutoff *time.Time,
 ) ([]domain.Position, error) {
-	walk, err := CollectClosedEpisodes(client, cutoff)
+	d, err := Load(client, cutoff, scope.Closed)
 	if err != nil {
 		return nil, err
 	}
-
-	groups := GroupsClosedAfter(walk.Groups, cutoff)
-	if len(groups) == 0 {
-		return []domain.Position{}, nil
-	}
-
-	since := walk.EarliestOpen()
-
-	positionEvents, err := executors.FetchAllPositionEventsSince(client, since)
-	if err != nil {
-		return nil, err
-	}
-
-	pairBySymbol := BuildPairMap(client, helpers.SymbolsFromFillsAndEvents(walk.Fills, positionEvents))
-	positions, err := builders.BuildClosedPositions(groups, positionEvents, pairBySymbol)
-	if err != nil {
-		return nil, err
-	}
-
-	EnrichMAEMFE(client, &positions, helpers.RawSymbolByPair(helpers.SymbolsFromFillsAndEvents(walk.Fills, positionEvents), pairBySymbol))
-
-	if cutoff != nil {
-		filtered := positions[:0]
-		for _, pos := range positions {
-			if pos.ClosedAt != nil && !pos.ClosedAt.Before(*cutoff) {
-				filtered = append(filtered, pos)
-			}
-		}
-		positions = filtered
-	}
-
-	if logs, err := executors.FetchAllAccountLogSince(client, since); err == nil {
-		snapshots := builders.BuildBalanceSnapshots(logs)
-		helpers.AttachBalanceInit(&positions, snapshots)
-	}
-
-	return positions, nil
+	return d.ClosedPositions()
 }

@@ -9,9 +9,10 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/binance/connector/binance/executors"
 	"github.com/m1xar/scope360-reconstruction/pkg/binance/connector/binance/models"
 	"github.com/m1xar/scope360-reconstruction/pkg/binance/service/reconstructor"
-	"github.com/m1xar/scope360-reconstruction/pkg/binance/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/binance/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/parallel"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/scope"
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
@@ -30,14 +31,49 @@ func GetAuthStatus(apiKey, secret string) string {
 	return "ok"
 }
 
+func load(client *resty.Client, creds binanceclient.Credentials, days int, s scope.Scope) (*reconstructor.Dataset, error) {
+	return reconstructor.Load(authClient(client, creds), helpers.CutoffFromDays(days), s)
+}
+
+// Sync fetches the account's raw data once and builds every model from it:
+// closed and open positions, balance snapshots, the current balance,
+// transactions and fundings for the last days (the whole retention when
+// days <= 0).
+func Sync(
+	client *resty.Client,
+	creds binanceclient.Credentials,
+	days int,
+) (*domain.Sync, error) {
+	d, err := load(client, creds, days, scope.All)
+	if err != nil {
+		return nil, err
+	}
+
+	out := &domain.Sync{}
+	err = parallel.Run(
+		func() (err error) { out.Positions, err = d.ClosedPositions(); return err },
+		func() (err error) { out.OpenPositions, err = d.OpenPositions(); return err },
+		func() error { out.BalanceSnapshots = d.BalanceSnapshots(); return nil },
+		func() error { out.Transactions = d.Transactions(); return nil },
+		func() error { out.Fundings = d.Fundings(); return nil },
+	)
+	if err != nil {
+		return nil, err
+	}
+	out.CurrentBalance = d.CurrentBalance()
+	return out, nil
+}
+
 func GetBuiltPositions(
 	client *resty.Client,
 	creds binanceclient.Credentials,
 	days int,
 ) ([]domain.Position, error) {
-	client = authClient(client, creds)
-
-	return reconstructor.ReconstructClosedPositions(client, helpers.CutoffFromDays(days))
+	d, err := load(client, creds, days, scope.Closed)
+	if err != nil {
+		return nil, err
+	}
+	return d.ClosedPositions()
 }
 
 func GetClosedPositionByExactMatch(
@@ -66,9 +102,11 @@ func GetOpenPositions(
 	client *resty.Client,
 	creds binanceclient.Credentials,
 ) ([]domain.OpenPosition, error) {
-	client = authClient(client, creds)
-
-	return reconstructor.ReconstructOpenPositions(client)
+	d, err := load(client, creds, 0, scope.Open)
+	if err != nil {
+		return nil, err
+	}
+	return d.OpenPositions()
 }
 
 func GetBalanceSnapshots(
@@ -76,25 +114,11 @@ func GetBalanceSnapshots(
 	creds binanceclient.Credentials,
 	days int,
 ) ([]domain.UserBalanceSnapshot, error) {
-	client = authClient(client, creds)
-
-	cutoff := helpers.CutoffFromDays(days)
-
-	snapshots, err := reconstructor.BalanceSnapshots(client, nil, cutoff)
+	d, err := load(client, creds, days, scope.Balances)
 	if err != nil {
 		return nil, err
 	}
-	if cutoff == nil {
-		return snapshots, nil
-	}
-
-	filtered := snapshots[:0]
-	for _, s := range snapshots {
-		if !s.CreatedAt.Before(*cutoff) {
-			filtered = append(filtered, s)
-		}
-	}
-	return filtered, nil
+	return d.BalanceSnapshots(), nil
 }
 
 func GetCurrentBalance(
@@ -117,31 +141,11 @@ func GetTransactions(
 	creds binanceclient.Credentials,
 	days int,
 ) ([]domain.Transaction, error) {
-	client = authClient(client, creds)
-
-	startMs := int64(0)
-	cutoff := helpers.CutoffFromDays(days)
-	if cutoff != nil {
-		startMs = cutoff.UnixMilli()
-	}
-
-	rows, err := executors.FetchAllIncome(client, startMs, 0, models.IncomeTransfer)
+	d, err := load(client, creds, days, scope.Transactions)
 	if err != nil {
 		return nil, err
 	}
-
-	transactions := builders.BuildTransactions(helpers.BuildLedger(rows))
-	if cutoff == nil {
-		return transactions, nil
-	}
-
-	filtered := transactions[:0]
-	for _, tx := range transactions {
-		if !tx.Time.Before(*cutoff) {
-			filtered = append(filtered, tx)
-		}
-	}
-	return filtered, nil
+	return d.Transactions(), nil
 }
 
 func GetFundings(
@@ -149,22 +153,11 @@ func GetFundings(
 	creds binanceclient.Credentials,
 	days int,
 ) ([]domain.UserFunding, error) {
-	client = authClient(client, creds)
-
-	startMs := int64(0)
-	if cutoff := helpers.CutoffFromDays(days); cutoff != nil {
-		startMs = cutoff.UnixMilli()
-	}
-
-	rows, err := executors.FetchAllIncome(client, startMs, 0, models.IncomeFundingFee)
+	d, err := load(client, creds, days, scope.Fundings)
 	if err != nil {
 		return nil, err
 	}
-	if special, err := executors.FetchAllIncome(client, startMs, 0, models.IncomeSpecialFunding); err == nil {
-		rows = append(rows, special...)
-	}
-
-	return builders.BuildFundings(helpers.BuildLedger(rows)), nil
+	return d.Fundings(), nil
 }
 
 func GetCandles(

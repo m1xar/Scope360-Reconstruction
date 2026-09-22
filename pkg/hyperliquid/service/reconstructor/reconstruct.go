@@ -9,8 +9,8 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/hyperliquid/executors"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor/workers"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/scope"
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
-	"sort"
 
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/connector/hyperliquid/models"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor/envelope"
@@ -232,74 +232,18 @@ func FillsSince(
 	return helpers.NormalizeFills(fills), nil
 }
 
+// ReconstructClosedPositions builds the positions closed after the cutoff
+// (the whole history when cutoff is nil).
 func ReconstructClosedPositions(
 	client *resty.Client,
 	endpoint, user string,
 	cutoff *time.Time,
 ) ([]domain.Position, error) {
-	walk, err := CollectEpisodes(client, endpoint, user, cutoff)
+	d, err := Load(client, endpoint, user, cutoff, scope.Closed)
 	if err != nil {
 		return nil, err
 	}
-
-	segments := helpers.EpisodesClosedAfter(walk.Segments, cutoff)
-	if len(segments) == 0 {
-		return []domain.Position{}, nil
-	}
-
-	orders, err := executors.FetchHistoricalOrders(client, endpoint, user)
-	if err != nil {
-		return nil, err
-	}
-
-	rawFundings, err := executors.FetchAllFunding(client, endpoint, user, walk.EarliestMs())
-	if err != nil {
-		return nil, err
-	}
-
-	rawPortfolio, err := executors.FetchPortfolioState(client, endpoint, user)
-	if err != nil {
-		return nil, err
-	}
-
-	portfolio, err := helpers.NormalizePortfolio(rawPortfolio)
-	if err != nil {
-		return nil, err
-	}
-
-	orderIdx := helpers.BuildOrderIndex(orders)
-
-	candleRequests := make(chan helpers.CandleRequest, defaultCandleWorkers)
-	workers.StartCandleWorkers(client, endpoint, candleRequests, defaultCandleWorkers)
-
-	envelopes := make(chan envelope.TradeEnvelope)
-	positionsCh := make(chan domain.Position)
-
-	go func() {
-		ReconstructTrades(segments, rawFundings, orderIdx, candleRequests, envelopes)
-		close(envelopes)
-		close(candleRequests)
-	}()
-
-	workers.StartPositionBuilders(envelopes, positionsCh, defaultPositionWorkers)
-
-	positions := make([]domain.Position, 0)
-	for pos := range positionsCh {
-		positions = append(positions, pos)
-	}
-
-	sort.Slice(positions, func(i, j int) bool {
-		return positions[i].ClosedAt.Before(*positions[j].ClosedAt)
-	})
-
-	balanceSnapshots := builders.BuildUserBalanceSnapshotsFromPortfolio(portfolio)
-	helpers.ReconstructBalancesFromRawFills(walk.Fills, &balanceSnapshots)
-	helpers.AttachBalanceInit(&positions, balanceSnapshots)
-	positions = helpers.FilterPositionsByClosedAt(positions, cutoff)
-	for i := range positions {
-		positions[i].Pair = helpers.NormalizeContractName(positions[i].Pair)
-	}
-	return positions, nil
+	return d.ClosedPositions()
 }
 
 func FindClosedPosition(
@@ -378,25 +322,15 @@ func FindClosedPosition(
 	return result, nil
 }
 
+// ReconstructOpenPositions builds the open positions from the whole fill
+// history.
 func ReconstructOpenPositions(
 	client *resty.Client,
 	endpoint, user string,
 ) ([]domain.OpenPosition, error) {
-	fills, err := executors.FetchAllFills(client, endpoint, user)
+	d, err := Load(client, endpoint, user, nil, scope.Open)
 	if err != nil {
 		return nil, err
 	}
-
-	fills = helpers.NormalizeFills(fills)
-
-	candleRequests := make(chan helpers.CandleRequest, defaultCandleWorkers)
-	workers.StartCandleWorkers(client, endpoint, candleRequests, defaultCandleWorkers)
-
-	openPositions := builders.BuildOpenPositionsFromFills(candleRequests, fills)
-	close(candleRequests)
-
-	for i := range openPositions {
-		openPositions[i].Pair = helpers.NormalizeContractName(openPositions[i].Pair)
-	}
-	return openPositions, nil
+	return d.OpenPositions()
 }

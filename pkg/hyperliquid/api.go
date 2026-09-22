@@ -13,7 +13,8 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/reconstructor/helpers"
-	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/parallel"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/scope"
 )
 
 const defaultTimeout = 20 * time.Second
@@ -22,17 +23,55 @@ func newDefaultClient() *resty.Client {
 	return resty.New().SetTimeout(defaultTimeout)
 }
 
+func load(client *resty.Client, endpoint, user string, days int, s scope.Scope) (*reconstructor.Dataset, error) {
+	if client == nil {
+		client = newDefaultClient()
+	}
+	return reconstructor.Load(client, endpoint, user, helpers.CutoffFromDays(days), s)
+}
+
+// Sync fetches the account's raw data once and builds every model from it:
+// closed and open positions, balance snapshots, the current balance,
+// transactions and fundings for the last days (the whole history when
+// days <= 0). Open positions need the whole fill history, so Sync loads it
+// once and serves the closed positions from it too.
+func Sync(
+	client *resty.Client,
+	endpoint string,
+	user string,
+	days int,
+) (*domain.Sync, error) {
+	d, err := load(client, endpoint, user, days, scope.All)
+	if err != nil {
+		return nil, err
+	}
+
+	out := &domain.Sync{}
+	err = parallel.Run(
+		func() (err error) { out.Positions, err = d.ClosedPositions(); return err },
+		func() (err error) { out.OpenPositions, err = d.OpenPositions(); return err },
+		func() error { out.BalanceSnapshots = d.BalanceSnapshots(); return nil },
+		func() error { out.Transactions = d.Transactions(); return nil },
+		func() error { out.Fundings = d.Fundings(); return nil },
+	)
+	if err != nil {
+		return nil, err
+	}
+	out.CurrentBalance = d.CurrentBalance()
+	return out, nil
+}
+
 func GetBuiltPositions(
 	client *resty.Client,
 	endpoint string,
 	user string,
 	days int,
 ) ([]domain.Position, error) {
-	if client == nil {
-		client = newDefaultClient()
+	d, err := load(client, endpoint, user, days, scope.Closed)
+	if err != nil {
+		return nil, err
 	}
-
-	return reconstructor.ReconstructClosedPositions(client, endpoint, user, helpers.CutoffFromDays(days))
+	return d.ClosedPositions()
 }
 
 func GetBalanceSnapshots(
@@ -41,39 +80,11 @@ func GetBalanceSnapshots(
 	user string,
 	days int,
 ) ([]domain.UserBalanceSnapshot, error) {
-	if client == nil {
-		client = newDefaultClient()
-	}
-
-	cutoff := helpers.CutoffFromDays(days)
-
-	fills, err := reconstructor.FillsSince(client, endpoint, user, cutoff)
+	d, err := load(client, endpoint, user, days, scope.Balances)
 	if err != nil {
 		return nil, err
 	}
-
-	rawPortfolio, err := executors.FetchPortfolioState(client, endpoint, user)
-	if err != nil {
-		return nil, err
-	}
-
-	portfolio, err := helpers.NormalizePortfolio(rawPortfolio)
-	if err != nil {
-		return nil, err
-	}
-
-	balanceSnapshots := builders.BuildUserBalanceSnapshotsFromPortfolio(portfolio)
-	if len(balanceSnapshots) == 0 || len(fills) == 0 {
-		return helpers.FilterBalanceSnapshotsByCreatedAt(balanceSnapshots, cutoff), nil
-	}
-
-	sort.Slice(balanceSnapshots, func(i, j int) bool {
-		return balanceSnapshots[i].CreatedAt.Before(balanceSnapshots[j].CreatedAt)
-	})
-
-	helpers.ReconstructBalancesFromRawFills(fills, &balanceSnapshots)
-	balanceSnapshots = helpers.FilterBalanceSnapshotsByCreatedAt(balanceSnapshots, cutoff)
-	return balanceSnapshots, nil
+	return d.BalanceSnapshots(), nil
 }
 
 func GetCurrentBalance(
@@ -112,32 +123,11 @@ func GetTransactions(
 	user string,
 	days int,
 ) ([]domain.Transaction, error) {
-	if client == nil {
-		client = newDefaultClient()
-	}
-
-	startMs := int64(0)
-	cutoff := helpers.CutoffFromDays(days)
-	if cutoff != nil {
-		startMs = cutoff.UnixMilli()
-	}
-
-	updates, err := executors.FetchAllNonFundingLedgerUpdates(client, endpoint, user, startMs, 0)
+	d, err := load(client, endpoint, user, days, scope.Transactions)
 	if err != nil {
 		return nil, err
 	}
-
-	transactions := builders.BuildTransactions(updates)
-	if cutoff != nil {
-		filtered := transactions[:0]
-		for _, tx := range transactions {
-			if !tx.Time.Before(*cutoff) {
-				filtered = append(filtered, tx)
-			}
-		}
-		transactions = filtered
-	}
-	return transactions, nil
+	return d.Transactions(), nil
 }
 
 func GetFundings(
@@ -146,26 +136,11 @@ func GetFundings(
 	user string,
 	days int,
 ) ([]domain.UserFunding, error) {
-	if client == nil {
-		client = newDefaultClient()
-	}
-
-	rawFundings, err := executors.FetchAllFunding(client, endpoint, user, window.StartMs(helpers.CutoffFromDays(days)))
+	d, err := load(client, endpoint, user, days, scope.Fundings)
 	if err != nil {
 		return nil, err
 	}
-
-	fundings := make([]domain.UserFunding, 0, len(rawFundings))
-	for _, fund := range rawFundings {
-		fundings = append(fundings, builders.BuildUserFunding(fund))
-	}
-
-	cutoff := helpers.CutoffFromDays(days)
-	fundings = helpers.FilterFundingsByCreatedAt(fundings, cutoff)
-	for i := range fundings {
-		fundings[i].Pair = helpers.NormalizeContractName(fundings[i].Pair)
-	}
-	return fundings, nil
+	return d.Fundings(), nil
 }
 
 func GetCandles(
@@ -279,10 +254,11 @@ func GetOpenPositions(
 	user string,
 	days int,
 ) ([]domain.OpenPosition, error) {
-	if client == nil {
-		client = newDefaultClient()
-	}
-	_ = days
+	_ = days // open positions need the whole fill history
 
-	return reconstructor.ReconstructOpenPositions(client, endpoint, user)
+	d, err := load(client, endpoint, user, 0, scope.Open)
+	if err != nil {
+		return nil, err
+	}
+	return d.OpenPositions()
 }

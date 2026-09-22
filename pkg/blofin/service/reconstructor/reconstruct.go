@@ -7,11 +7,10 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/m1xar/scope360-reconstruction/pkg/blofin/connector/blofin/executors"
 	"github.com/m1xar/scope360-reconstruction/pkg/blofin/connector/blofin/models"
-	"github.com/m1xar/scope360-reconstruction/pkg/blofin/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/blofin/service/reconstructor/envelope"
 	"github.com/m1xar/scope360-reconstruction/pkg/blofin/service/reconstructor/helpers"
-	"github.com/m1xar/scope360-reconstruction/pkg/blofin/service/reconstructor/workers"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/scope"
 )
 
 func ReconstructPositions(
@@ -122,17 +121,18 @@ func (w FillWalk) EarliestOpenMs() int64 {
 	return earliest
 }
 
-func CollectClosedEpisodes(
+// collectClosedEpisodes pages the fills newest first, seeded with the open
+// positions, until the cutoff is passed, no episode is left half walked and
+// reachMs (the oldest open position, when its fills are wanted too) is
+// covered; with no cutoff it walks to the lookback floor.
+func collectClosedEpisodes(
 	client *resty.Client,
 	baseURL string,
 	instruments map[string]models.Instrument,
+	openPositions []models.OpenPosition,
 	cutoff *time.Time,
+	reachMs int64,
 ) (FillWalk, error) {
-	openPositions, err := executors.FetchOpenPositions(client, baseURL)
-	if err != nil {
-		return FillWalk{}, err
-	}
-
 	var (
 		segmenter = helpers.NewFillSegmenter(openPositions, instruments)
 		walk      FillWalk
@@ -176,7 +176,7 @@ func CollectClosedEpisodes(
 		if oldestMs < floorMs {
 			break
 		}
-		if cutoff != nil && oldestMs < cutoff.UnixMilli() && segmenter.Flat() {
+		if cutoff != nil && oldestMs < cutoff.UnixMilli() && (reachMs == 0 || oldestMs < reachMs) && segmenter.Flat() {
 			break
 		}
 		after = page[len(page)-1].TradeID
@@ -214,124 +214,29 @@ func GroupsClosedAfter(groups [][]models.Fill, cutoff *time.Time) [][]models.Fil
 	return kept
 }
 
-func BalanceSnapshots(
-	client *resty.Client,
-	baseURL string,
-	positions []domain.Position,
-	cutoff *time.Time,
-) ([]domain.UserBalanceSnapshot, error) {
-	currentEquity, err := executors.FetchTotalEquity(client, baseURL)
-	if err != nil {
-		return nil, err
-	}
-
-	windowStart := helpers.BalanceWindowStart(positions, cutoff)
-	startMs := int64(0)
-	if windowStart != nil {
-		startMs = windowStart.UnixMilli()
-	}
-
-	transfers, err := executors.FetchAllTransfers(client, baseURL, startMs)
-	if err != nil {
-		return nil, err
-	}
-
-	return builders.BuildBalanceSnapshots(currentEquity, transfers, positions, windowStart), nil
-}
-
+// ReconstructClosedPositions builds the positions closed after the cutoff
+// (the whole lookback when cutoff is nil).
 func ReconstructClosedPositions(
 	client *resty.Client,
 	baseURL string,
 	cutoff *time.Time,
 ) ([]domain.Position, error) {
-	instruments, err := executors.FetchInstruments(client, baseURL)
+	d, err := Load(client, baseURL, cutoff, scope.Closed)
 	if err != nil {
 		return nil, err
 	}
-
-	walk, err := CollectClosedEpisodes(client, baseURL, instruments, cutoff)
-	if err != nil {
-		return nil, err
-	}
-
-	groups := GroupsClosedAfter(walk.Groups, cutoff)
-	if len(groups) == 0 {
-		return []domain.Position{}, nil
-	}
-
-	oldestMs := walk.EarliestOpenMs() - historyLookback.Milliseconds()
-
-	orders, err := executors.FetchAllOrders(client, baseURL, oldestMs)
-	if err != nil {
-		return nil, err
-	}
-
-	fundings, err := executors.FetchAllFundingFees(client, baseURL, oldestMs)
-	if err != nil {
-		fundings = nil
-	}
-
-	candleRequests := make(chan helpers.CandleRequest, defaultCandleWorkers)
-	workers.StartCandleWorkers(client, baseURL, candleRequests, defaultCandleWorkers)
-
-	envelopes := make(chan envelope.PositionEnvelope)
-	positionsCh := make(chan domain.Position)
-
-	go func() {
-		ReconstructPositions(
-			groups, helpers.IndexOrdersByID(orders), fundings, instruments,
-			candleRequests, envelopes,
-		)
-		close(envelopes)
-		close(candleRequests)
-	}()
-
-	workers.StartPositionBuilders(envelopes, positionsCh, defaultPositionWorkers)
-
-	positions := make([]domain.Position, 0)
-	for pos := range positionsCh {
-		positions = append(positions, pos)
-	}
-
-	sort.Slice(positions, func(i, j int) bool {
-		return positions[i].ClosedAt.Before(*positions[j].ClosedAt)
-	})
-
-	if snapshots, err := BalanceSnapshots(client, baseURL, positions, cutoff); err == nil {
-		helpers.AttachBalanceInit(&positions, snapshots)
-	}
-
-	return positions, nil
+	return d.ClosedPositions()
 }
 
+// ReconstructOpenPositions builds the open positions with their opening
+// orders.
 func ReconstructOpenPositions(
 	client *resty.Client,
 	baseURL string,
 ) ([]domain.OpenPosition, error) {
-	raw, err := executors.FetchOpenPositions(client, baseURL)
+	d, err := Load(client, baseURL, nil, scope.Open)
 	if err != nil {
 		return nil, err
 	}
-	if len(raw) == 0 {
-		return []domain.OpenPosition{}, nil
-	}
-
-	instruments, err := executors.FetchInstruments(client, baseURL)
-	if err != nil {
-		return nil, err
-	}
-
-	startMs := helpers.OldestPositionMs(raw) - historyLookback.Milliseconds()
-
-	fills, err := executors.FetchAllFills(client, baseURL, startMs)
-	if err != nil {
-		return nil, err
-	}
-
-	orders, err := executors.FetchAllOrders(client, baseURL, startMs)
-	if err != nil {
-		return nil, err
-	}
-
-	return builders.BuildOpenPositions(raw, fills, helpers.IndexOrdersByID(orders), instruments), nil
+	return d.OpenPositions()
 }

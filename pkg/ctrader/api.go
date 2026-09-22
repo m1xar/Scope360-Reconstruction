@@ -3,16 +3,16 @@ package ctrader
 import (
 	"context"
 	"fmt"
-	"sort"
 	"time"
 
 	connector "github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader"
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader/executors"
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader/models"
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/service/reconstructor"
-	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/parallel"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/scope"
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
@@ -31,12 +31,56 @@ func GetAuthStatus(client *connector.Client, cfg connector.Config) string {
 	return "ok"
 }
 
+func load(client *connector.Client, cfg connector.Config, days int, s scope.Scope) (*reconstructor.Dataset, error) {
+	return reconstructor.Load(context.Background(), newClient(client, cfg), days, s)
+}
+
+// Sync fetches the account's raw data once and builds every model from it:
+// closed and open positions, balance snapshots, the account info and
+// transactions for the last days (a year when days <= 0).
+func Sync(
+	client *connector.Client,
+	cfg connector.Config,
+	days int,
+) (*domain.SyncFX, error) {
+	d, err := load(client, cfg, days, scope.Closed|scope.Open|scope.Balances|scope.Transactions)
+	if err != nil {
+		return nil, err
+	}
+
+	out := &domain.SyncFX{}
+	err = parallel.Run(
+		func() error { out.Positions = d.ClosedPositions(); return nil },
+		func() error { out.OpenPositions = d.OpenPositions(); return nil },
+		func() error { out.BalanceSnapshots = d.BalanceSnapshots(); return nil },
+		func() error {
+			info, err := d.AccountInfo()
+			if err != nil {
+				return err
+			}
+			if info != nil {
+				out.AccountInfo = *info
+			}
+			return nil
+		},
+		func() error { out.Transactions = d.Transactions(); return nil },
+	)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func GetBuiltPositions(
 	client *connector.Client,
 	cfg connector.Config,
 	days int,
 ) ([]domain.FXPosition, error) {
-	return reconstructor.ReconstructClosedPositions(context.Background(), newClient(client, cfg), days, reconstructor.WithExcursions)
+	d, err := load(client, cfg, days, scope.Closed)
+	if err != nil {
+		return nil, err
+	}
+	return d.ClosedPositions(), nil
 }
 
 func GetClosedPositionByExactMatch(
@@ -63,23 +107,11 @@ func GetOpenPositions(
 	client *connector.Client,
 	cfg connector.Config,
 ) ([]domain.FXOpenPosition, error) {
-	ctx := context.Background()
-	c := newClient(client, cfg)
-
-	session, err := c.EnsureSession(ctx)
+	d, err := load(client, cfg, 0, scope.Open)
 	if err != nil {
 		return nil, err
 	}
-	symbols, err := executors.FetchSymbolNames(ctx, c)
-	if err != nil {
-		return nil, err
-	}
-	reconcile, err := executors.FetchReconcile(ctx, c)
-	if err != nil {
-		return nil, err
-	}
-	currentPrices := helpers.FetchCurrentPrices(ctx, c, reconcile)
-	return builders.BuildOpenPositions(reconcile, symbols, currentPrices, session), nil
+	return d.OpenPositions(), nil
 }
 
 func GetBalanceSnapshots(
@@ -89,23 +121,11 @@ func GetBalanceSnapshots(
 ) ([]domain.UserBalanceSnapshot, error) {
 	// BalanceInit is absolute per position (from the deal's balance), so
 	// only positions closed inside the window are needed, and no candles.
-	positions, err := reconstructor.ReconstructClosedPositions(context.Background(), newClient(client, cfg), days, reconstructor.PositionsOnly)
+	d, err := load(client, cfg, days, scope.Balances)
 	if err != nil {
 		return nil, err
 	}
-	snapshots := builders.BuildBalanceSnapshots(positions)
-	cutoff := helpers.CutoffFromDays(days)
-	if cutoff != nil {
-		filtered := snapshots[:0]
-		for _, snapshot := range snapshots {
-			if !snapshot.CreatedAt.Before(*cutoff) {
-				filtered = append(filtered, snapshot)
-			}
-		}
-		snapshots = filtered
-	}
-	sort.Slice(snapshots, func(i, j int) bool { return snapshots[i].CreatedAt.Before(snapshots[j].CreatedAt) })
-	return snapshots, nil
+	return d.BalanceSnapshots(), nil
 }
 
 func GetAccountInfo(
@@ -143,27 +163,11 @@ func GetTransactions(
 	cfg connector.Config,
 	days int,
 ) ([]domain.Transaction, error) {
-	ctx := context.Background()
-	c := newClient(client, cfg)
-	from, to := helpers.HistoryRange(days)
-
-	cashFlow, err := executors.FetchCashFlowHistory(ctx, c, from, to)
+	d, err := load(client, cfg, days, scope.Transactions)
 	if err != nil {
 		return nil, err
 	}
-
-	transactions := builders.BuildTransactions(cashFlow)
-	cutoff := helpers.CutoffFromDays(days)
-	if cutoff != nil {
-		filtered := transactions[:0]
-		for _, tx := range transactions {
-			if !tx.Time.Before(*cutoff) {
-				filtered = append(filtered, tx)
-			}
-		}
-		transactions = filtered
-	}
-	return transactions, nil
+	return d.Transactions(), nil
 }
 
 func GetCandles(

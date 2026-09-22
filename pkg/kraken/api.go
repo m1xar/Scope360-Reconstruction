@@ -3,7 +3,6 @@ package kraken
 import (
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -14,6 +13,8 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/kraken/service/reconstructor"
 	"github.com/m1xar/scope360-reconstruction/pkg/kraken/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/kraken/service/reconstructor/helpers"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/parallel"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/scope"
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
@@ -33,14 +34,49 @@ func GetAuthStatus(client *resty.Client, creds krakenclient.Credentials) string 
 	return "ok"
 }
 
+func load(client *resty.Client, creds krakenclient.Credentials, days int, s scope.Scope) (*reconstructor.Dataset, error) {
+	return reconstructor.Load(authClient(client, creds), helpers.CutoffFromDays(days), s)
+}
+
+// Sync fetches the account's raw data once and builds every model from it:
+// closed and open positions, balance snapshots, the current balance,
+// transactions and fundings for the last days (the whole history when
+// days <= 0).
+func Sync(
+	client *resty.Client,
+	creds krakenclient.Credentials,
+	days int,
+) (*domain.Sync, error) {
+	d, err := load(client, creds, days, scope.All)
+	if err != nil {
+		return nil, err
+	}
+
+	out := &domain.Sync{}
+	err = parallel.Run(
+		func() (err error) { out.Positions, err = d.ClosedPositions(); return err },
+		func() (err error) { out.OpenPositions, err = d.OpenPositions(); return err },
+		func() error { out.BalanceSnapshots = d.BalanceSnapshots(); return nil },
+		func() error { out.Transactions = d.Transactions(); return nil },
+		func() error { out.Fundings = d.Fundings(); return nil },
+	)
+	if err != nil {
+		return nil, err
+	}
+	out.CurrentBalance = d.CurrentBalance()
+	return out, nil
+}
+
 func GetBuiltPositions(
 	client *resty.Client,
 	creds krakenclient.Credentials,
 	days int,
 ) ([]domain.Position, error) {
-	client = authClient(client, creds)
-
-	return reconstructor.ReconstructClosedPositions(client, helpers.CutoffFromDays(days))
+	d, err := load(client, creds, days, scope.Closed)
+	if err != nil {
+		return nil, err
+	}
+	return d.ClosedPositions()
 }
 
 func GetClosedPositionByExactMatch(
@@ -69,35 +105,11 @@ func GetOpenPositions(
 	client *resty.Client,
 	creds krakenclient.Credentials,
 ) ([]domain.OpenPosition, error) {
-	client = authClient(client, creds)
-
-	rawPositions, err := executors.FetchOpenPositions(client)
+	d, err := load(client, creds, 0, scope.Open)
 	if err != nil {
 		return nil, err
 	}
-	if len(rawPositions) == 0 {
-		return []domain.OpenPosition{}, nil
-	}
-
-	tickers, err := executors.FetchTickers(client)
-	if err != nil {
-		return nil, err
-	}
-	tickerBySymbol := make(map[string]models.Ticker, len(tickers))
-	for _, ticker := range tickers {
-		tickerBySymbol[strings.ToUpper(ticker.Symbol)] = ticker
-	}
-
-	out := make([]domain.OpenPosition, 0, len(rawPositions))
-	for _, pos := range rawPositions {
-		if pos.Size.Float64() <= 0 {
-			continue
-		}
-		ticker := tickerBySymbol[strings.ToUpper(pos.Symbol)]
-		out = append(out, builders.BuildOpenPosition(pos, ticker))
-	}
-	reconstructor.EnrichOpenPositionOrders(client, rawPositions, out)
-	return out, nil
+	return d.OpenPositions()
 }
 
 func GetBalanceSnapshots(
@@ -105,35 +117,11 @@ func GetBalanceSnapshots(
 	creds krakenclient.Credentials,
 	days int,
 ) ([]domain.UserBalanceSnapshot, error) {
-	client = authClient(client, creds)
-	return balanceSnapshotsFromClient(client, days)
-}
-
-// balanceSnapshotsFromClient assumes client already has auth attached.
-// Used to avoid resty "Overwriting an existing pre-request hook" when callers
-// fall back into snapshot fetch on an already-authed client.
-func balanceSnapshotsFromClient(client *resty.Client, days int) ([]domain.UserBalanceSnapshot, error) {
-	logs, err := executors.FetchAllAccountLog(client, days)
+	d, err := load(client, creds, days, scope.Balances)
 	if err != nil {
 		return nil, err
 	}
-	snapshots := builders.BuildBalanceSnapshots(logs)
-
-	cutoff := helpers.CutoffFromDays(days)
-	if cutoff != nil {
-		filtered := snapshots[:0]
-		for _, s := range snapshots {
-			if !s.CreatedAt.Before(*cutoff) {
-				filtered = append(filtered, s)
-			}
-		}
-		snapshots = filtered
-	}
-
-	sort.Slice(snapshots, func(i, j int) bool {
-		return snapshots[i].CreatedAt.Before(snapshots[j].CreatedAt)
-	})
-	return snapshots, nil
+	return d.BalanceSnapshots(), nil
 }
 
 func GetCurrentBalance(
@@ -149,16 +137,21 @@ func GetCurrentBalance(
 		}
 	}
 
-	snapshots, snapErr := balanceSnapshotsFromClient(client, 0)
-	if snapErr != nil {
+	// Fall back to the latest balance snapshot of the whole account log.
+	logs, logErr := executors.FetchAllAccountLogSince(client, time.Time{})
+	if logErr != nil {
 		if err != nil {
 			return nil, err
 		}
-		return nil, snapErr
+		return nil, logErr
 	}
+	snapshots := builders.BuildBalanceSnapshots(logs)
 	if len(snapshots) == 0 {
 		return nil, nil
 	}
+	sort.Slice(snapshots, func(i, j int) bool {
+		return snapshots[i].CreatedAt.Before(snapshots[j].CreatedAt)
+	})
 	val := snapshots[len(snapshots)-1].Balance
 	return &val, nil
 }
@@ -168,25 +161,11 @@ func GetTransactions(
 	creds krakenclient.Credentials,
 	days int,
 ) ([]domain.Transaction, error) {
-	client = authClient(client, creds)
-
-	logs, err := executors.FetchAllAccountLog(client, days)
+	d, err := load(client, creds, days, scope.Transactions)
 	if err != nil {
 		return nil, err
 	}
-
-	transactions := builders.BuildTransactions(logs)
-	cutoff := helpers.CutoffFromDays(days)
-	if cutoff != nil {
-		filtered := transactions[:0]
-		for _, tx := range transactions {
-			if !tx.Time.Before(*cutoff) {
-				filtered = append(filtered, tx)
-			}
-		}
-		transactions = filtered
-	}
-	return transactions, nil
+	return d.Transactions(), nil
 }
 
 func GetFundings(
@@ -194,26 +173,11 @@ func GetFundings(
 	creds krakenclient.Credentials,
 	days int,
 ) ([]domain.UserFunding, error) {
-	client = authClient(client, creds)
-
-	logs, err := executors.FetchAllAccountLog(client, days)
+	d, err := load(client, creds, days, scope.Fundings)
 	if err != nil {
 		return nil, err
 	}
-	pairBySymbol := reconstructor.BuildPairMap(client, helpers.SymbolsFromAccountLogs(logs))
-	fundings := builders.BuildFundings(logs, pairBySymbol)
-
-	cutoff := helpers.CutoffFromDays(days)
-	if cutoff != nil {
-		filtered := fundings[:0]
-		for _, f := range fundings {
-			if !f.CreatedAt.Before(*cutoff) {
-				filtered = append(filtered, f)
-			}
-		}
-		fundings = filtered
-	}
-	return fundings, nil
+	return d.Fundings(), nil
 }
 
 func GetCandles(

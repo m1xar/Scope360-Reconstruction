@@ -2,7 +2,6 @@ package mexc
 
 import (
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -11,8 +10,9 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/connector/mexc/executors"
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/connector/mexc/models"
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/service/reconstructor"
-	"github.com/m1xar/scope360-reconstruction/pkg/mexc/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/service/reconstructor/helpers"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/parallel"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/scope"
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
@@ -27,25 +27,50 @@ func GetAuthStatus(client *resty.Client, creds mexcclient.Credentials) string {
 	return "ok"
 }
 
+func load(client *resty.Client, creds mexcclient.Credentials, days int, s scope.Scope) (*reconstructor.Dataset, error) {
+	mexcclient.AttachAuth(client, creds)
+	return reconstructor.Load(client, helpers.CutoffFromDays(days), s)
+}
+
+// Sync fetches the account's raw data once and builds every model from it:
+// closed and open positions, balance snapshots, the current balance,
+// transactions and fundings for the last days (the whole history when
+// days <= 0).
+func Sync(
+	client *resty.Client,
+	creds mexcclient.Credentials,
+	days int,
+) (*domain.Sync, error) {
+	d, err := load(client, creds, days, scope.All)
+	if err != nil {
+		return nil, err
+	}
+
+	out := &domain.Sync{}
+	err = parallel.Run(
+		func() (err error) { out.Positions, err = d.ClosedPositions(); return err },
+		func() (err error) { out.OpenPositions, err = d.OpenPositions(); return err },
+		func() (err error) { out.BalanceSnapshots, err = d.BalanceSnapshots(); return err },
+		func() error { out.Transactions = d.Transactions(); return nil },
+		func() error { out.Fundings = d.Fundings(); return nil },
+	)
+	if err != nil {
+		return nil, err
+	}
+	out.CurrentBalance = d.CurrentBalance()
+	return out, nil
+}
+
 func GetBuiltPositions(
 	client *resty.Client,
 	creds mexcclient.Credentials,
 	days int,
 ) ([]domain.Position, error) {
-	mexcclient.AttachAuth(client, creds)
-
-	cutoff := helpers.CutoffFromDays(days)
-
-	positions, err := reconstructor.ReconstructClosedPositions(client, cutoff)
+	d, err := load(client, creds, days, scope.Closed)
 	if err != nil {
 		return nil, err
 	}
-
-	if snapshots, err := reconstructor.BalanceSnapshots(client, positions, cutoff); err == nil {
-		helpers.AttachBalanceInit(&positions, snapshots)
-	}
-
-	return positions, nil
+	return d.ClosedPositions()
 }
 
 func GetClosedPositionByExactMatch(
@@ -73,22 +98,11 @@ func GetOpenPositions(
 	client *resty.Client,
 	creds mexcclient.Credentials,
 ) ([]domain.OpenPosition, error) {
-	mexcclient.AttachAuth(client, creds)
-
-	raw, err := executors.FetchOpenPositions(client)
+	d, err := load(client, creds, 0, scope.Open)
 	if err != nil {
 		return nil, err
 	}
-
-	positions := make([]domain.OpenPosition, 0, len(raw))
-	for _, r := range raw {
-		if r.HoldVol <= 0 {
-			continue
-		}
-		positions = append(positions, builders.BuildOpenPosition(r))
-	}
-	reconstructor.EnrichOpenPositionOrders(client, raw, positions)
-	return positions, nil
+	return d.OpenPositions()
 }
 
 func GetBalanceSnapshots(
@@ -96,35 +110,11 @@ func GetBalanceSnapshots(
 	creds mexcclient.Credentials,
 	days int,
 ) ([]domain.UserBalanceSnapshot, error) {
-	mexcclient.AttachAuth(client, creds)
-
-	cutoff := helpers.CutoffFromDays(days)
-
-	positions, err := reconstructor.ReconstructClosedPositions(client, cutoff)
+	d, err := load(client, creds, days, scope.Balances)
 	if err != nil {
 		return nil, err
 	}
-
-	snapshots, err := reconstructor.BalanceSnapshots(client, positions, cutoff)
-	if err != nil {
-		return nil, err
-	}
-
-	if cutoff != nil {
-		filtered := snapshots[:0]
-		for _, s := range snapshots {
-			if !s.CreatedAt.Before(*cutoff) {
-				filtered = append(filtered, s)
-			}
-		}
-		snapshots = filtered
-	}
-
-	sort.Slice(snapshots, func(i, j int) bool {
-		return snapshots[i].CreatedAt.Before(snapshots[j].CreatedAt)
-	})
-
-	return snapshots, nil
+	return d.BalanceSnapshots()
 }
 
 func GetCurrentBalance(
@@ -146,25 +136,11 @@ func GetTransactions(
 	creds mexcclient.Credentials,
 	days int,
 ) ([]domain.Transaction, error) {
-	mexcclient.AttachAuth(client, creds)
-
-	transfers, err := executors.FetchAllTransferRecords(client, window.StartMs(helpers.CutoffFromDays(days)))
+	d, err := load(client, creds, days, scope.Transactions)
 	if err != nil {
 		return nil, err
 	}
-
-	transactions := builders.BuildTransactions(transfers)
-	cutoff := helpers.CutoffFromDays(days)
-	if cutoff != nil {
-		filtered := transactions[:0]
-		for _, tx := range transactions {
-			if !tx.Time.Before(*cutoff) {
-				filtered = append(filtered, tx)
-			}
-		}
-		transactions = filtered
-	}
-	return transactions, nil
+	return d.Transactions(), nil
 }
 
 func GetFundings(
@@ -172,27 +148,11 @@ func GetFundings(
 	creds mexcclient.Credentials,
 	days int,
 ) ([]domain.UserFunding, error) {
-	mexcclient.AttachAuth(client, creds)
-
-	records, err := executors.FetchAllFundingRecords(client, window.StartMs(helpers.CutoffFromDays(days)))
+	d, err := load(client, creds, days, scope.Fundings)
 	if err != nil {
 		return nil, err
 	}
-
-	fundings := builders.BuildUserFundings(records)
-
-	cutoff := helpers.CutoffFromDays(days)
-	if cutoff != nil {
-		filtered := fundings[:0]
-		for _, f := range fundings {
-			if !f.CreatedAt.Before(*cutoff) {
-				filtered = append(filtered, f)
-			}
-		}
-		fundings = filtered
-	}
-
-	return fundings, nil
+	return d.Fundings(), nil
 }
 
 func GetCandles(

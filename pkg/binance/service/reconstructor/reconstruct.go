@@ -8,11 +8,10 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/m1xar/scope360-reconstruction/pkg/binance/connector/binance/executors"
 	"github.com/m1xar/scope360-reconstruction/pkg/binance/connector/binance/models"
-	"github.com/m1xar/scope360-reconstruction/pkg/binance/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/binance/service/reconstructor/envelope"
 	"github.com/m1xar/scope360-reconstruction/pkg/binance/service/reconstructor/helpers"
-	"github.com/m1xar/scope360-reconstruction/pkg/binance/service/reconstructor/workers"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/scope"
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
@@ -162,9 +161,9 @@ type symbolWalk struct {
 // walkSymbolFills walks a symbol's trades backwards in 7-day windows down to
 // floorMs (the symbol's first trade). With a cutoff it stops once the window
 // is past it and no episode is left half walked, so positions that straddle
-// the cutoff are still completed. With untilResolved it stops as soon as
-// every open position seeded from openPositions has been walked back to its
-// opening fill.
+// the cutoff are still completed. With untilResolved the walk also has to
+// reach the opening fill of every open position seeded from openPositions;
+// without a cutoff it stops as soon as it has.
 func walkSymbolFills(
 	fetch func(startMs, endMs int64) ([]models.Trade, error),
 	symbol string,
@@ -183,10 +182,14 @@ func walkSymbolFills(
 		floorMs = retentionFloor
 	}
 	for _, span := range window.Backward(now, floorMs, executors.TradesWindowMax.Milliseconds()) {
-		if untilResolved && segmenter.Resolved() {
+		settled := segmenter.Flat()
+		if untilResolved {
+			settled = segmenter.Resolved()
+		}
+		if cutoff == nil && untilResolved && settled {
 			break
 		}
-		if cutoff != nil && span.EndMs < cutoffMs && segmenter.Flat() {
+		if cutoff != nil && span.EndMs < cutoffMs && settled {
 			break
 		}
 
@@ -343,160 +346,25 @@ func fetchSymbolConfigLenient(client *resty.Client) map[string]models.SymbolConf
 	return cfg
 }
 
-func BalanceSnapshots(
-	client *resty.Client,
-	ledger *helpers.Ledger,
-	windowStart *time.Time,
-) ([]domain.UserBalanceSnapshot, error) {
-	account, err := executors.FetchAccount(client)
-	if err != nil {
-		return nil, err
-	}
-
-	if ledger == nil {
-		startMs := int64(0)
-		if windowStart != nil {
-			startMs = windowStart.UnixMilli()
-		}
-		ledger, err = LoadLedger(client, startMs)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return builders.BuildBalanceSnapshots(executors.StableWalletBalance(account), ledger, windowStart), nil
-}
-
+// ReconstructClosedPositions builds the positions closed after the cutoff
+// (the whole history when cutoff is nil).
 func ReconstructClosedPositions(
 	client *resty.Client,
 	cutoff *time.Time,
 ) ([]domain.Position, error) {
-	openPositions, err := executors.FetchOpenPositions(client)
+	d, err := Load(client, cutoff, scope.Closed)
 	if err != nil {
 		return nil, err
 	}
-
-	// Any position closed after the cutoff left REALIZED_PNL/COMMISSION
-	// income after it, so income from the cutoff is enough to find the
-	// symbols to walk. cutoff == nil keeps the full retention.
-	ledgerStartMs := window.StartMs(cutoff)
-	ledger, err := LoadLedger(client, ledgerStartMs)
-	if err != nil {
-		return nil, err
-	}
-
-	symbols := unionSymbols(ledger, openPositions)
-	if len(symbols) == 0 {
-		return []domain.Position{}, nil
-	}
-
-	walks, err := collectWalks(client, symbols, openPositions, cutoff, false)
-	if err != nil {
-		return nil, err
-	}
-	var groups [][]models.Trade
-	for _, w := range walks {
-		groups = append(groups, w.groups...)
-	}
-	groups = GroupsClosedAfter(groups, cutoff)
-	if len(groups) == 0 {
-		return []domain.Position{}, nil
-	}
-	normalizeGroupFees(client, groups)
-
-	// A surviving position may have opened before the cutoff: extend the
-	// ledger back to its open for funding, insurance fees and balance.
-	if cutoff != nil {
-		earliestMs := groups[0][0].Time
-		for _, g := range groups {
-			if g[0].Time < earliestMs {
-				earliestMs = g[0].Time
-			}
-		}
-		if earliestMs < ledgerStartMs {
-			// Income is fetched with inclusive bounds: stop just before the
-			// range the ledger already holds.
-			earlier, err := executors.FetchAllIncome(client, earliestMs, ledgerStartMs-1, "")
-			if err != nil {
-				return nil, err
-			}
-			ledger = helpers.BuildLedger(append(earlier, ledger.Entries...))
-		}
-	}
-
-	symbolCfg := fetchSymbolConfigLenient(client)
-
-	orders, err := collectOrders(client, groupFills(groups))
-	if err != nil {
-		return nil, err
-	}
-
-	candleRequests := make(chan helpers.CandleRequest, defaultCandleWorkers)
-	workers.StartCandleWorkers(client, candleRequests, defaultCandleWorkers)
-
-	envelopes := make(chan envelope.PositionEnvelope)
-	positionsCh := make(chan domain.Position)
-
-	go func() {
-		ReconstructPositions(
-			groups,
-			helpers.IndexOrdersByID(orders),
-			helpers.GroupOrdersBySymbol(orders),
-			ledger,
-			symbolCfg,
-			candleRequests,
-			envelopes,
-		)
-		close(envelopes)
-		close(candleRequests)
-	}()
-
-	workers.StartPositionBuilders(envelopes, positionsCh, defaultPositionWorkers)
-
-	positions := make([]domain.Position, 0)
-	for pos := range positionsCh {
-		positions = append(positions, pos)
-	}
-
-	sort.Slice(positions, func(i, j int) bool {
-		return positions[i].ClosedAt.Before(*positions[j].ClosedAt)
-	})
-
-	if snapshots, err := BalanceSnapshots(client, ledger, helpers.BalanceWindowStart(positions, cutoff)); err == nil {
-		helpers.AttachBalanceInit(&positions, snapshots)
-	}
-
-	return positions, nil
+	return d.ClosedPositions()
 }
 
+// ReconstructOpenPositions builds the open positions with their opening
+// orders.
 func ReconstructOpenPositions(client *resty.Client) ([]domain.OpenPosition, error) {
-	raw, err := executors.FetchOpenPositions(client)
+	d, err := Load(client, nil, scope.Open)
 	if err != nil {
 		return nil, err
 	}
-	if len(raw) == 0 {
-		return []domain.OpenPosition{}, nil
-	}
-
-	symbolCfg := fetchSymbolConfigLenient(client)
-
-	walks, err := collectWalks(client, unionSymbols(nil, raw), raw, nil, true)
-	if err != nil {
-		return nil, err
-	}
-	var openFills []models.Trade
-	for _, w := range walks {
-		openFills = append(openFills, w.openFills...)
-	}
-	helpers.NormalizeFees(client, openFills)
-
-	var orders []models.Order
-	if len(openFills) > 0 {
-		orders, err = collectOrders(client, openFills)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return builders.BuildOpenPositions(raw, openFills, helpers.IndexOrdersByID(orders), symbolCfg), nil
+	return d.OpenPositions()
 }

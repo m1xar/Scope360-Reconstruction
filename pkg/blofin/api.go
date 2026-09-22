@@ -9,9 +9,10 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/blofin/connector/blofin/executors"
 	"github.com/m1xar/scope360-reconstruction/pkg/blofin/connector/blofin/models"
 	"github.com/m1xar/scope360-reconstruction/pkg/blofin/service/reconstructor"
-	"github.com/m1xar/scope360-reconstruction/pkg/blofin/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/blofin/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/parallel"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/scope"
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
@@ -28,14 +29,50 @@ func GetAuthStatus(apiKey, secret, passphrase string) string {
 	return "ok"
 }
 
+func load(client *resty.Client, creds blofinclient.Credentials, days int, s scope.Scope) (*reconstructor.Dataset, error) {
+	blofinclient.AttachAuth(client, creds)
+	return reconstructor.Load(client, blofinclient.BaseURL, helpers.CutoffFromDays(days), s)
+}
+
+// Sync fetches the account's raw data once and builds every model from it:
+// closed and open positions, balance snapshots, the current balance,
+// transactions and fundings for the last days (the whole lookback when
+// days <= 0).
+func Sync(
+	client *resty.Client,
+	creds blofinclient.Credentials,
+	days int,
+) (*domain.Sync, error) {
+	d, err := load(client, creds, days, scope.All)
+	if err != nil {
+		return nil, err
+	}
+
+	out := &domain.Sync{}
+	err = parallel.Run(
+		func() (err error) { out.Positions, err = d.ClosedPositions(); return err },
+		func() (err error) { out.OpenPositions, err = d.OpenPositions(); return err },
+		func() (err error) { out.BalanceSnapshots, err = d.BalanceSnapshots(); return err },
+		func() error { out.Transactions = d.Transactions(); return nil },
+		func() error { out.Fundings = d.Fundings(); return nil },
+	)
+	if err != nil {
+		return nil, err
+	}
+	out.CurrentBalance = d.CurrentBalance()
+	return out, nil
+}
+
 func GetBuiltPositions(
 	client *resty.Client,
 	creds blofinclient.Credentials,
 	days int,
 ) ([]domain.Position, error) {
-	blofinclient.AttachAuth(client, creds)
-
-	return reconstructor.ReconstructClosedPositions(client, blofinclient.BaseURL, helpers.CutoffFromDays(days))
+	d, err := load(client, creds, days, scope.Closed)
+	if err != nil {
+		return nil, err
+	}
+	return d.ClosedPositions()
 }
 
 func GetClosedPositionByExactMatch(
@@ -63,9 +100,11 @@ func GetOpenPositions(
 	client *resty.Client,
 	creds blofinclient.Credentials,
 ) ([]domain.OpenPosition, error) {
-	blofinclient.AttachAuth(client, creds)
-
-	return reconstructor.ReconstructOpenPositions(client, blofinclient.BaseURL)
+	d, err := load(client, creds, 0, scope.Open)
+	if err != nil {
+		return nil, err
+	}
+	return d.OpenPositions()
 }
 
 func GetBalanceSnapshots(
@@ -73,30 +112,11 @@ func GetBalanceSnapshots(
 	creds blofinclient.Credentials,
 	days int,
 ) ([]domain.UserBalanceSnapshot, error) {
-
-	cutoff := helpers.CutoffFromDays(days)
-
-	positions, err := GetBuiltPositions(client, creds, days)
+	d, err := load(client, creds, days, scope.Balances)
 	if err != nil {
 		return nil, err
 	}
-
-	snapshots, err := reconstructor.BalanceSnapshots(client, blofinclient.BaseURL, positions, cutoff)
-	if err != nil {
-		return nil, err
-	}
-
-	if cutoff == nil {
-		return snapshots, nil
-	}
-
-	filtered := snapshots[:0]
-	for _, s := range snapshots {
-		if !s.CreatedAt.Before(*cutoff) {
-			filtered = append(filtered, s)
-		}
-	}
-	return filtered, nil
+	return d.BalanceSnapshots()
 }
 
 func GetCurrentBalance(
@@ -118,31 +138,11 @@ func GetTransactions(
 	creds blofinclient.Credentials,
 	days int,
 ) ([]domain.Transaction, error) {
-	blofinclient.AttachAuth(client, creds)
-
-	startMs := int64(0)
-	cutoff := helpers.CutoffFromDays(days)
-	if cutoff != nil {
-		startMs = cutoff.UnixMilli()
-	}
-
-	transfers, err := executors.FetchAllTransfers(client, blofinclient.BaseURL, startMs)
+	d, err := load(client, creds, days, scope.Transactions)
 	if err != nil {
 		return nil, err
 	}
-
-	transactions := builders.BuildTransactionsFromTransfers(transfers)
-	if cutoff == nil {
-		return transactions, nil
-	}
-
-	filtered := transactions[:0]
-	for _, tx := range transactions {
-		if !tx.Time.Before(*cutoff) {
-			filtered = append(filtered, tx)
-		}
-	}
-	return filtered, nil
+	return d.Transactions(), nil
 }
 
 func GetFundings(
@@ -150,19 +150,11 @@ func GetFundings(
 	creds blofinclient.Credentials,
 	days int,
 ) ([]domain.UserFunding, error) {
-	blofinclient.AttachAuth(client, creds)
-
-	startMs := int64(0)
-	if cutoff := helpers.CutoffFromDays(days); cutoff != nil {
-		startMs = cutoff.UnixMilli()
-	}
-
-	fees, err := executors.FetchAllFundingFees(client, blofinclient.BaseURL, startMs)
+	d, err := load(client, creds, days, scope.Fundings)
 	if err != nil {
 		return nil, err
 	}
-
-	return builders.BuildFundings(fees), nil
+	return d.Fundings(), nil
 }
 
 func GetCandles(

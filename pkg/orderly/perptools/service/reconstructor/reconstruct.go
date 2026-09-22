@@ -2,7 +2,6 @@ package reconstructor
 
 import (
 	"math"
-	"sort"
 	"strings"
 	"time"
 
@@ -13,8 +12,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/orderly/perptools/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/orderly/perptools/service/reconstructor/envelope"
 	"github.com/m1xar/scope360-reconstruction/pkg/orderly/perptools/service/reconstructor/helpers"
-	"github.com/m1xar/scope360-reconstruction/pkg/orderly/perptools/service/reconstructor/workers"
-	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/scope"
 )
 
 const (
@@ -27,6 +25,7 @@ const (
 
 type TradeWalk struct {
 	Groups [][]models.OrderlyTrade
+	Trades []models.OrderlyTrade // every trade the walk fetched
 }
 
 func (w TradeWalk) EarliestOpenMs() int64 {
@@ -46,16 +45,17 @@ func (w TradeWalk) EarliestOpenMs() int64 {
 	return earliest
 }
 
-func CollectClosedEpisodes(
+// collectClosedEpisodes walks the trades newest first in two-week chunks,
+// seeded with the open positions, until the cutoff is passed, no episode is
+// left half walked and reachMs (the oldest open position, when its trades
+// are wanted too) is covered; with no cutoff it fetches the whole history.
+func collectClosedEpisodes(
 	client *connector.Client,
 	symbol string,
+	openPositions []models.OrderlyPosition,
 	cutoff *time.Time,
+	reachMs int64,
 ) (TradeWalk, error) {
-	openPositions, err := executors.FetchOpenPositions(client)
-	if err != nil {
-		return TradeWalk{}, err
-	}
-
 	segmenter := helpers.NewTradeSegmenter(openPositions)
 	var walk TradeWalk
 
@@ -65,6 +65,7 @@ func CollectClosedEpisodes(
 			return TradeWalk{}, err
 		}
 		walk.Groups = segmenter.PushOlderBatch(trades)
+		walk.Trades = trades
 		return walk, nil
 	}
 
@@ -86,11 +87,12 @@ func CollectClosedEpisodes(
 			return TradeWalk{}, err
 		}
 		walk.Groups = append(walk.Groups, segmenter.PushOlderBatch(trades)...)
+		walk.Trades = append(walk.Trades, trades...)
 
 		if windowStart <= floorMs {
 			break
 		}
-		if windowStart <= cutoffMs && segmenter.Flat() {
+		if windowStart <= cutoffMs && (reachMs == 0 || windowStart <= reachMs) && segmenter.Flat() {
 			break
 		}
 		windowEnd = windowStart - 1
@@ -118,76 +120,20 @@ func GroupsClosedAfter(groups [][]models.OrderlyTrade, cutoff *time.Time) [][]mo
 	return kept
 }
 
+// ReconstructClosedPositions builds the positions closed after the cutoff
+// (the whole history when cutoff is nil), without current risk data or
+// BalanceInit.
 func ReconstructClosedPositions(
 	client *connector.Client,
 	symbol string,
 	cutoff *time.Time,
 ) ([]domain.Position, error) {
-	walk, err := CollectClosedEpisodes(client, symbol, cutoff)
+	_ = symbol // every symbol is walked
+	d, err := Load(client, cutoff, scope.Closed)
 	if err != nil {
 		return nil, err
 	}
-
-	groups := GroupsClosedAfter(walk.Groups, cutoff)
-	if len(groups) == 0 {
-		return []domain.Position{}, nil
-	}
-
-	since := walk.EarliestOpenMs()
-
-	orders, err := executors.FetchFilledOrders(client, symbol, since, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	algoOrders, err := executors.FetchAlgoOrders(client, symbol, since, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	fundings, err := executors.FetchAllFunding(client, symbol, since, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	orderMap := helpers.BuildOrderMap(orders)
-	algoIdx := helpers.BuildAlgoOrderIndex(algoOrders)
-
-	candleRequests := make(chan helpers.CandleRequest, defaultCandleWorkers)
-	workers.StartCandleWorkers(client, candleRequests, defaultCandleWorkers)
-
-	envelopes := make(chan envelope.TradeEnvelope)
-	positionsCh := make(chan domain.Position)
-
-	go func() {
-		ReconstructTrades(groups, fundings, orderMap, algoIdx, candleRequests, envelopes)
-		close(envelopes)
-		close(candleRequests)
-	}()
-
-	workers.StartPositionBuilders(envelopes, positionsCh, defaultPositionWorkers)
-
-	positions := make([]domain.Position, 0)
-	for pos := range positionsCh {
-		positions = append(positions, pos)
-	}
-
-	sort.Slice(positions, func(i, j int) bool {
-		iClosedAt := positions[i].ClosedAt
-		jClosedAt := positions[j].ClosedAt
-		if iClosedAt == nil && jClosedAt == nil {
-			return i < j
-		}
-		if iClosedAt == nil {
-			return false
-		}
-		if jClosedAt == nil {
-			return true
-		}
-		return iClosedAt.Before(*jClosedAt)
-	})
-
-	return positions, nil
+	return d.ClosedPositions()
 }
 
 func ReconstructTrades(
@@ -263,61 +209,9 @@ func ReconstructTrades(
 	}
 }
 
-func BalanceSnapshots(
-	c *connector.Client,
-	positions []domain.Position,
-	cutoff *time.Time,
-) ([]domain.UserBalanceSnapshot, error) {
-	snapshot, err := executors.FetchPositionsSnapshot(c)
-	if err != nil {
-		return nil, err
-	}
-
-	windowStart := helpers.BalanceWindowStart(positions, cutoff)
-	assetHistory, err := executors.FetchAssetHistory(c, window.StartMs(windowStart), 0)
-	if err != nil {
-		return nil, err
-	}
-
-	markPrices, err := executors.FetchMarkPrices(c)
-	if err != nil {
-		return nil, err
-	}
-
-	return builders.BuildBalanceSnapshots(
-		snapshot.AccountValue,
-		assetHistory,
-		positions,
-		markPrices,
-		windowStart,
-	)
-}
-
-func EnrichOpenPositionOrders(c *connector.Client, positions []domain.OpenPosition) {
-	if len(positions) == 0 {
-		return
-	}
-
-	// Trades before a position's OpenTime are discarded below, so the
-	// fetch only needs to reach back to the oldest open position.
-	startMs := int64(0)
-	for _, pos := range positions {
-		if ms := pos.OpenTime.UnixMilli(); ms > 0 && (startMs == 0 || ms < startMs) {
-			startMs = ms
-		}
-	}
-
-	trades, err := executors.FetchAllTrades(c, "", startMs, 0)
-	if err != nil {
-		return
-	}
-
-	orders, err := executors.FetchFilledOrders(c, "", startMs, 0)
-	orderMap := map[int64]models.OrderlyOrder{}
-	if err == nil {
-		orderMap = helpers.BuildOrderMap(orders)
-	}
-
+// enrichOpenPositionOrders attaches to each open position the trades on its
+// symbol since it opened, as orders.
+func enrichOpenPositionOrders(trades []models.OrderlyTrade, orderMap map[int64]models.OrderlyOrder, positions []domain.OpenPosition) {
 	for i := range positions {
 		pos := &positions[i]
 		openMs := pos.OpenTime.UnixMilli()
@@ -335,17 +229,11 @@ func EnrichOpenPositionOrders(c *connector.Client, positions []domain.OpenPositi
 	}
 }
 
-func EnrichPositionsWithCurrentRisk(client *connector.Client, positions *[]domain.Position) error {
-	if positions == nil || len(*positions) == 0 {
-		return nil
-	}
-
-	resp, err := executors.FetchPositionsSnapshot(client)
-	if err != nil {
-		return err
-	}
-	if resp == nil || len(resp.Rows) == 0 {
-		return nil
+// enrichPositionsWithRisk copies the current leverage and liquidation price
+// of every symbol from the positions snapshot onto the closed positions.
+func enrichPositionsWithRisk(resp *models.OrderlyPositionsResponse, positions []domain.Position) {
+	if resp == nil || len(resp.Rows) == 0 || len(positions) == 0 {
+		return
 	}
 
 	type riskInfo struct {
@@ -361,19 +249,17 @@ func EnrichPositionsWithCurrentRisk(client *connector.Client, positions *[]domai
 		}
 	}
 
-	for i := range *positions {
-		pair := strings.ToUpper(strings.TrimSpace((*positions)[i].Pair))
+	for i := range positions {
+		pair := strings.ToUpper(strings.TrimSpace(positions[i].Pair))
 		risk, ok := byPair[pair]
 		if !ok {
 			continue
 		}
 		if risk.leverage > 0 {
-			(*positions)[i].Multiplier = uint32(math.Round(risk.leverage))
+			positions[i].Multiplier = uint32(math.Round(risk.leverage))
 		}
 		if risk.liq > 0 {
-			(*positions)[i].LiquidationPrice = helpers.Round8(risk.liq)
+			positions[i].LiquidationPrice = helpers.Round8(risk.liq)
 		}
 	}
-
-	return nil
 }
