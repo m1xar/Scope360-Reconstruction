@@ -2,6 +2,7 @@ package builders
 
 import (
 	"math"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/m1xar/scope360-reconstruction/pkg/binance/connector/binance/models"
@@ -50,6 +51,13 @@ func buildOpenPosition(
 		openTime = helpers.TimeFromMs(pos.UpdateTime)
 	}
 
+	orders := buildOrders(episode.Parts, helpers.OrdersForEpisode(episode, ordersByID), positionID)
+	if len(orders) == 0 {
+		// Binance serves no fills for this position (history gap): stand in
+		// a single opening order for the full size at the entry price.
+		orders = []domain.Order{syntheticOpenOrder(pos, side, openTime, positionID)}
+	}
+
 	return domain.OpenPosition{
 		ID:           positionID,
 		Pair:         helpers.NormalizePair(pos.Symbol),
@@ -59,10 +67,38 @@ func buildOpenPosition(
 		EntryPrice:   helpers.Round8(helpers.MustFloat(pos.EntryPrice)),
 		CurrentPrice: helpers.Round8(helpers.MustFloat(pos.MarkPrice)),
 		OpenTime:     openTime,
-		Orders: buildOrders(
-			episode.Parts,
-			helpers.OrdersForEpisode(episode, ordersByID),
-			positionID,
-		),
+		Orders:       orders,
+	}
+}
+
+func syntheticOpenOrder(pos models.PositionRisk, side string, at time.Time, positionID uuid.UUID) domain.Order {
+	orderSide := "BUY"
+	if side == "SHORT" {
+		orderSide = "SELL"
+	}
+	amount := helpers.Round8(math.Abs(helpers.MustFloat(pos.PositionAmt)))
+	price := helpers.Round8(helpers.MustFloat(pos.EntryPrice))
+	orderID, err := uuid.NewV7()
+	if err != nil {
+		orderID = uuid.Nil
+	}
+	return domain.Order{
+		ID:            orderID,
+		PositionID:    positionID,
+		Type:          "MARKET",
+		Status:        "FILLED",
+		Side:          orderSide,
+		Amount:        amount,
+		AmountFilled:  amount,
+		AveragePrice:  price,
+		OriginalPrice: price,
+		UpdatedAt:     at,
+		Trade: domain.Trade{
+			OrderID: orderID,
+			Side:    orderSide,
+			Price:   price,
+			Amount:  amount,
+			DoneAt:  at,
+		},
 	}
 }
