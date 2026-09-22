@@ -172,13 +172,7 @@ func walkSymbolFills(
 	cutoff *time.Time,
 	untilResolved bool,
 ) (symbolWalk, error) {
-	var own []models.PositionRisk
-	for _, p := range openPositions {
-		if p.Symbol == symbol {
-			own = append(own, p)
-		}
-	}
-	segmenter := helpers.NewFillSegmenter(own)
+	segmenter := helpers.NewFillSegmenter(ownPositions(openPositions, symbol))
 
 	cutoffMs := int64(0)
 	if cutoff != nil {
@@ -205,6 +199,16 @@ func walkSymbolFills(
 	return walk, nil
 }
 
+func ownPositions(openPositions []models.PositionRisk, symbol string) []models.PositionRisk {
+	var own []models.PositionRisk
+	for _, p := range openPositions {
+		if p.Symbol == symbol {
+			own = append(own, p)
+		}
+	}
+	return own
+}
+
 func collectWalks(
 	client *resty.Client,
 	symbols []string,
@@ -213,6 +217,27 @@ func collectWalks(
 	untilResolved bool,
 ) ([]symbolWalk, error) {
 	return forEachSymbol(symbols, func(symbol string) ([]symbolWalk, error) {
+		if cutoff == nil && !untilResolved {
+			// Full history: one forward pass by id is far cheaper than a
+			// backwards walk over every week of retention.
+			fills, err := executors.FetchAllUserTrades(client, symbol)
+			if err != nil {
+				return nil, err
+			}
+			seg := helpers.NewFillSegmenter(ownPositions(openPositions, symbol))
+			return []symbolWalk{{groups: seg.PushOlderBatch(fills), openFills: seg.OpenFills()}}, nil
+		}
+		if untilResolved {
+			// An open position whose fills Binance no longer serves would
+			// otherwise be walked to the retention floor for nothing.
+			has, err := executors.HasUserTrades(client, symbol)
+			if err != nil {
+				return nil, err
+			}
+			if !has {
+				return []symbolWalk{{}}, nil
+			}
+		}
 		walk, err := walkSymbolFills(func(startMs, endMs int64) ([]models.Trade, error) {
 			return executors.FetchUserTradesWindow(client, symbol, startMs, endMs)
 		}, symbol, openPositions, cutoff, untilResolved)

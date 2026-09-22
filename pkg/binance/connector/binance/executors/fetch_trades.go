@@ -74,3 +74,72 @@ func FetchUserTradesWindow(client *resty.Client, symbol string, startMs, endMs i
 	})
 	return result, nil
 }
+
+// HasUserTrades reports whether Binance has any trade history for symbol
+// (one request from id 0), so a walk over years of empty windows can be
+// skipped for positions whose fills are not available.
+func HasUserTrades(client *resty.Client, symbol string) (bool, error) {
+	page, err := doWithRateLimit(func() ([]models.Trade, error) {
+		return binance.DoGet[[]models.Trade](client, userTradesPath, map[string]string{
+			"symbol": symbol, "fromId": "0", "limit": "1",
+		}, 5)
+	})
+	if err != nil {
+		return false, err
+	}
+	return len(page) > 0, nil
+}
+
+// FetchAllUserTrades walks a symbol's entire trade history forward by id
+// (one request per 1000 trades). Used for a full-history sync, where the
+// windowed backwards walk would cost a request per week of retention.
+func FetchAllUserTrades(client *resty.Client, symbol string) ([]models.Trade, error) {
+	var result []models.Trade
+	seen := make(map[int64]struct{})
+	fromID := int64(0)
+
+	for {
+		page, err := doWithRateLimit(func() ([]models.Trade, error) {
+			return binance.DoGet[[]models.Trade](client, userTradesPath, map[string]string{
+				"symbol": symbol,
+				"fromId": fmt.Sprint(fromID),
+				"limit":  fmt.Sprintf("%d", tradesPageLimit),
+			}, 5)
+		})
+		if err != nil {
+			if len(result) > 0 && isHTTP5xx(err) {
+				break
+			}
+			return nil, err
+		}
+		if len(page) == 0 {
+			break
+		}
+
+		added := 0
+		maxID := int64(0)
+		for _, fill := range page {
+			if fill.ID > maxID {
+				maxID = fill.ID
+			}
+			if _, ok := seen[fill.ID]; ok {
+				continue
+			}
+			seen[fill.ID] = struct{}{}
+			result = append(result, fill)
+			added++
+		}
+		if len(page) < tradesPageLimit || added == 0 || maxID < fromID {
+			break
+		}
+		fromID = maxID + 1
+	}
+
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].Time == result[j].Time {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].Time < result[j].Time
+	})
+	return result, nil
+}
