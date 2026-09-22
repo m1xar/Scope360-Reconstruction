@@ -10,8 +10,9 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/executors"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/models"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor"
-	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/helpers"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/parallel"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/scope"
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
@@ -22,6 +23,41 @@ func GetAuthStatus(apiKey, secret, passphrase string) (string, okxclient.Region)
 	}
 
 	return "ok", region
+}
+
+func load(client *resty.Client, creds okxclient.Credentials, baseURL string, days int, s scope.Scope) (*reconstructor.Dataset, error) {
+	okxclient.AttachAuth(client, creds)
+	return reconstructor.Load(client, baseURL, helpers.CutoffFromDays(days), s)
+}
+
+// Sync fetches the account's raw data once and builds every model from it:
+// closed and open positions, balance snapshots, the current balance,
+// transactions and fundings for the last days (the whole archive when
+// days <= 0).
+func Sync(
+	client *resty.Client,
+	creds okxclient.Credentials,
+	baseURL string,
+	days int,
+) (*domain.Sync, error) {
+	d, err := load(client, creds, baseURL, days, scope.All)
+	if err != nil {
+		return nil, err
+	}
+
+	out := &domain.Sync{}
+	err = parallel.Run(
+		func() (err error) { out.Positions, err = d.ClosedPositions(); return err },
+		func() (err error) { out.OpenPositions, err = d.OpenPositions(); return err },
+		func() error { out.BalanceSnapshots = d.BalanceSnapshots(); return nil },
+		func() error { out.Transactions = d.Transactions(); return nil },
+		func() error { out.Fundings = d.Fundings(); return nil },
+	)
+	if err != nil {
+		return nil, err
+	}
+	out.CurrentBalance = d.CurrentBalance()
+	return out, nil
 }
 
 func GetClosedPositionByExactMatch(
@@ -52,36 +88,11 @@ func GetBalanceSnapshots(
 	baseURL string,
 	days int,
 ) ([]domain.UserBalanceSnapshot, error) {
-	okxclient.AttachAuth(client, creds)
-
-	balance, err := executors.FetchBalance(client, baseURL)
+	d, err := load(client, creds, baseURL, days, scope.Balances)
 	if err != nil {
 		return nil, err
 	}
-	currentBal := helpers.MustFloat(balance.TotalEq)
-
-	startMs := int64(0)
-	cutoff := helpers.CutoffFromDays(days)
-	if cutoff != nil {
-		startMs = cutoff.UnixMilli()
-	}
-
-	bills, err := executors.FetchAllSwapAndFuturesBills(client, baseURL, startMs, "")
-	if err != nil {
-		return nil, err
-	}
-	snapshots := builders.BuildBalanceSnapshotsFromBills(currentBal, bills)
-	if cutoff != nil {
-		filtered := snapshots[:0]
-		for _, s := range snapshots {
-			if !s.CreatedAt.Before(*cutoff) {
-				filtered = append(filtered, s)
-			}
-		}
-		snapshots = filtered
-	}
-
-	return snapshots, nil
+	return d.BalanceSnapshots(), nil
 }
 
 func GetCurrentBalance(
@@ -106,30 +117,11 @@ func GetTransactions(
 	baseURL string,
 	days int,
 ) ([]domain.Transaction, error) {
-	okxclient.AttachAuth(client, creds)
-
-	startMs := int64(0)
-	cutoff := helpers.CutoffFromDays(days)
-	if cutoff != nil {
-		startMs = cutoff.UnixMilli()
-	}
-
-	bills, err := executors.FetchAllBills(client, baseURL, "", startMs, "")
+	d, err := load(client, creds, baseURL, days, scope.Transactions)
 	if err != nil {
 		return nil, err
 	}
-
-	transactions := builders.BuildTransactionsFromBills(bills)
-	if cutoff != nil {
-		filtered := transactions[:0]
-		for _, tx := range transactions {
-			if !tx.Time.Before(*cutoff) {
-				filtered = append(filtered, tx)
-			}
-		}
-		transactions = filtered
-	}
-	return transactions, nil
+	return d.Transactions(), nil
 }
 
 func GetFundings(
@@ -138,33 +130,11 @@ func GetFundings(
 	baseURL string,
 	days int,
 ) ([]domain.UserFunding, error) {
-	okxclient.AttachAuth(client, creds)
-
-	startMs := int64(0)
-	cutoff := helpers.CutoffFromDays(days)
-	if cutoff != nil {
-		startMs = cutoff.UnixMilli()
-	}
-
-	bills, err := executors.FetchAllSwapAndFuturesBills(client, baseURL, startMs, "8")
+	d, err := load(client, creds, baseURL, days, scope.Fundings)
 	if err != nil {
 		return nil, err
 	}
-
-	fundings := make([]domain.UserFunding, 0, len(bills))
-	for _, b := range bills {
-		amount := helpers.MustFloat(b.BalChg)
-		if amount == 0 {
-			continue
-		}
-		fundings = append(fundings, domain.UserFunding{
-			Pair:      helpers.NormalizePair(b.InstId),
-			Amount:    helpers.Round8(amount),
-			CreatedAt: helpers.TimeFromMs(b.Ts),
-		})
-	}
-
-	return fundings, nil
+	return d.Fundings(), nil
 }
 
 func GetCandles(
@@ -195,9 +165,11 @@ func GetBuiltPositions(
 	baseURL string,
 	days int,
 ) ([]domain.Position, error) {
-	okxclient.AttachAuth(client, creds)
-
-	return reconstructor.ReconstructClosedPositions(client, baseURL, days)
+	d, err := load(client, creds, baseURL, days, scope.Closed)
+	if err != nil {
+		return nil, err
+	}
+	return d.ClosedPositions()
 }
 
 func GetOpenPositions(
@@ -205,7 +177,9 @@ func GetOpenPositions(
 	creds okxclient.Credentials,
 	baseURL string,
 ) ([]domain.OpenPosition, error) {
-	okxclient.AttachAuth(client, creds)
-
-	return reconstructor.ReconstructOpenPositions(client, baseURL)
+	d, err := load(client, creds, baseURL, 0, scope.Open)
+	if err != nil {
+		return nil, err
+	}
+	return d.OpenPositions()
 }

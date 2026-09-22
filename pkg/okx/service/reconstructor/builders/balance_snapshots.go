@@ -14,9 +14,22 @@ func BuildBalanceSnapshotsFromBills(
 	currentBalance float64,
 	bills []models.Bill,
 ) []domain.UserBalanceSnapshot {
-	snapshots := make([]domain.UserBalanceSnapshot, 0, len(bills)+1)
+	// Several bills can share a millisecond; the balance after the last of
+	// them (the highest bill id) is the one to keep, whatever order the
+	// archive returned them in.
+	ordered := make([]models.Bill, len(bills))
+	copy(ordered, bills)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		ti, tj := helpers.MustInt64(ordered[i].Ts), helpers.MustInt64(ordered[j].Ts)
+		if ti != tj {
+			return ti < tj
+		}
+		return helpers.MustInt64(ordered[i].BillId) < helpers.MustInt64(ordered[j].BillId)
+	})
 
-	for _, b := range bills {
+	snapshots := make([]domain.UserBalanceSnapshot, 0, len(ordered)+1)
+
+	for _, b := range ordered {
 		if !strings.Contains(strings.ToUpper(b.Ccy), "USD") {
 			continue
 		}
@@ -33,7 +46,7 @@ func BuildBalanceSnapshotsFromBills(
 		Balance:   helpers.Round8(currentBalance),
 	})
 
-	sort.Slice(snapshots, func(i, j int) bool {
+	sort.SliceStable(snapshots, func(i, j int) bool {
 		return snapshots[i].CreatedAt.Before(snapshots[j].CreatedAt)
 	})
 

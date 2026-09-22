@@ -10,10 +10,9 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/executors"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/models"
-	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/builders"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/workers"
-	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/scope"
 )
 
 const defaultCandleWorkers = 4
@@ -23,39 +22,32 @@ const defaultCandleWorkers = 4
 // start earlier than the position's cTime.
 const openPositionOrdersLookback = 7 * 24 * 60 * 60 * 1000
 
+// ReconstructClosedPositions builds the positions closed in the last days
+// (all of the archive when days <= 0).
 func ReconstructClosedPositions(
 	client *resty.Client,
 	baseURL string,
 	days int,
 ) ([]domain.Position, error) {
-	sinceMs := window.StartMs(helpers.CutoffFromDays(days))
-
-	closedPositions, err := executors.FetchAllClosedPositions(client, baseURL, sinceMs)
+	d, err := Load(client, baseURL, helpers.CutoffFromDays(days), scope.Closed)
 	if err != nil {
 		return nil, err
 	}
-	closedPositions = closedPositionsAfter(closedPositions, sinceMs)
-	if len(closedPositions) == 0 {
-		return []domain.Position{}, nil
-	}
+	return d.ClosedPositions()
+}
 
-	// Everything below (orders, fills, candles, bills) is fetched from the
-	// open time of the oldest surviving position, not from the cutoff: a
-	// position closed inside the window may have been opened long before it.
-
-	oldestMs := helpers.MustInt64(closedPositions[0].CTime)
-	for _, cp := range closedPositions[1:] {
-		if t := helpers.MustInt64(cp.CTime); t < oldestMs {
-			oldestMs = t
-		}
-	}
-
-	oldestMs -= 10 * 60 * 1000
-
-	allOrders, fills, fillsErr, err := fetchOrdersAndFills(client, baseURL, oldestMs, oldestMs)
-	if err != nil {
-		return nil, err
-	}
+// buildClosedPositions matches orders to every closed position, builds it
+// and fills in MAE/MFE from candles; positions that cannot be built are
+// dropped. The result is sorted by close time.
+func buildClosedPositions(
+	client *resty.Client,
+	baseURL string,
+	closedPositions []models.ClosedPosition,
+	allOrders []models.Order,
+	fills []models.Fill,
+	fillsErr error,
+	instruments map[string]models.Instrument,
+) []domain.Position {
 	ordersByInst := helpers.GroupOrdersByInst(allOrders)
 	parents := helpers.OrdersByID(allOrders)
 	fillsByInst := helpers.GroupFillsByInst(fills)
@@ -66,21 +58,6 @@ func ReconstructClosedPositions(
 	type pendingCandle struct {
 		idx     int
 		replyCh chan helpers.CandleResponse
-	}
-
-	identifiers := map[string]models.Instrumentidentifier{}
-	for _, cp := range closedPositions {
-		_, ok := identifiers[cp.InstId]
-		if ok {
-			continue
-		}
-
-		identifiers[cp.InstId] = models.Instrumentidentifier{InstID: cp.InstId, InstType: cp.InstType}
-	}
-
-	instruments, err := executors.FetchInstruments(client, baseURL, identifiers)
-	if err != nil {
-		return nil, err
 	}
 
 	pending := make([]pendingCandle, 0, len(closedPositions))
@@ -137,18 +114,7 @@ func ReconstructClosedPositions(
 	sort.Slice(positions, func(i, j int) bool {
 		return positions[i].ClosedAt.Before(*positions[j].ClosedAt)
 	})
-
-	balance, err := executors.FetchBalance(client, baseURL)
-	if err == nil {
-		currentBal := helpers.MustFloat(balance.TotalEq)
-		bills, billsErr := executors.FetchAllSwapAndFuturesBills(client, baseURL, oldestMs, "")
-		if billsErr == nil && len(bills) > 0 {
-			snapshots := builders.BuildBalanceSnapshotsFromBills(currentBal, bills)
-			helpers.AttachBalanceInit(&positions, snapshots)
-		}
-	}
-
-	return positions, nil
+	return positions
 }
 
 func closedPositionsAfter(positions []models.ClosedPosition, sinceMs int64) []models.ClosedPosition {
@@ -164,66 +130,31 @@ func closedPositionsAfter(positions []models.ClosedPosition, sinceMs int64) []mo
 	return kept
 }
 
+// ReconstructOpenPositions builds the open positions with their opening
+// orders.
 func ReconstructOpenPositions(
 	client *resty.Client,
 	baseURL string,
 ) ([]domain.OpenPosition, error) {
-	raw, err := executors.FetchOpenPositions(client, baseURL)
+	d, err := Load(client, baseURL, nil, scope.Open)
 	if err != nil {
 		return nil, err
 	}
-
-	identifiers := map[string]models.Instrumentidentifier{}
-	for _, cp := range raw {
-		_, ok := identifiers[cp.InstId]
-		if ok {
-			continue
-		}
-
-		identifiers[cp.InstId] = models.Instrumentidentifier{InstID: cp.InstId, InstType: cp.InstType}
-	}
-
-	instruments, err := executors.FetchInstruments(client, baseURL, identifiers)
-	if err != nil {
-		return nil, err
-	}
-
-	positions := make([]domain.OpenPosition, 0, len(raw))
-	for _, r := range raw {
-		positions = append(positions, builders.BuildOpenPosition(r, instruments[r.InstId]))
-	}
-
-	enrichOpenPositionOrders(client, baseURL, raw, positions, instruments)
-	return positions, nil
+	return d.OpenPositions()
 }
 
+// enrichOpenPositionOrders attaches the opening orders to every open
+// position: from fills when they loaded, otherwise from whole orders placed
+// after the position opened.
 func enrichOpenPositionOrders(
-	client *resty.Client,
-	baseURL string,
+	orders []models.Order,
+	fills []models.Fill,
+	fillsErr error,
 	raw []models.OpenPosition,
 	positions []domain.OpenPosition,
 	instruments map[string]models.Instrument,
 ) {
 	if len(raw) == 0 || len(positions) == 0 {
-		return
-	}
-
-	startMs := int64(0)
-	for _, r := range raw {
-		t := helpers.MustInt64(r.CTime)
-		if t == 0 {
-			continue
-		}
-		if startMs == 0 || t < startMs {
-			startMs = t
-		}
-	}
-	if startMs == 0 {
-		return
-	}
-
-	orders, fills, fillsErr, err := fetchOrdersAndFills(client, baseURL, startMs-openPositionOrdersLookback, startMs)
-	if err != nil {
 		return
 	}
 	parents := helpers.OrdersByID(orders)
