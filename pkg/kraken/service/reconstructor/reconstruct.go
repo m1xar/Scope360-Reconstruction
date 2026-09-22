@@ -220,14 +220,11 @@ func EnrichOpenPositionOrders(
 		return
 	}
 
-	// Kraken reports no usable open time for a position (fillTime is the
-	// epoch), so its fills are found by walking the history backwards from
-	// the live size until every open position is back at zero.
-	openFills, err := CollectOpenFills(client, raw)
-	if err != nil {
-		return
-	}
-
+	// Kraken reports the epoch as fillTime for open positions and its fills
+	// omit liquidations, so each position's orders come from its position
+	// events, walked newest first down to the event that opened it. Fills
+	// are the fallback when the events are unavailable.
+	var openFills map[string][]models.Fill
 	posIdx := 0
 	for _, rawPos := range raw {
 		if rawPos.Size.Float64() <= 0 {
@@ -236,10 +233,72 @@ func EnrichOpenPositionOrders(
 		if posIdx >= len(positions) {
 			return
 		}
-		matched := openFills[strings.ToUpper(strings.TrimSpace(rawPos.Symbol))]
-		positions[posIdx].Orders = builders.BuildOpenOrdersFromFills(matched, positions[posIdx].ID)
+		pos := &positions[posIdx]
 		posIdx++
+
+		symbol := strings.ToUpper(strings.TrimSpace(rawPos.Symbol))
+		events, err := CollectOpenEvents(client, symbol)
+		if err == nil && len(events) > 0 {
+			pos.Orders = builders.BuildOpenOrdersFromEvents(events, pos.ID)
+			if openedAt := time.UnixMilli(eventMs(events[0])).UTC(); pos.OpenTime.IsZero() || pos.OpenTime.Year() < 2000 {
+				pos.OpenTime = openedAt
+			}
+			continue
+		}
+
+		if openFills == nil {
+			openFills, err = CollectOpenFills(client, raw)
+			if err != nil {
+				return
+			}
+		}
+		pos.Orders = builders.BuildOpenOrdersFromFills(openFills[symbol], pos.ID)
 	}
+}
+
+// openEventsMaxPages caps the walk back through a symbol's position events
+// (1000 per page, one per hour of funding while a position is open).
+const openEventsMaxPages = 30
+
+// CollectOpenEvents returns the execution events of the current position on
+// symbol, oldest first, starting with the event that opened it (from flat
+// or by flipping through zero). Nil when no opening event was found.
+func CollectOpenEvents(client *resty.Client, symbol string) ([]models.PositionUpdate, error) {
+	var collected []models.PositionUpdate
+	continuation := ""
+	for page := 0; page < openEventsMaxPages; page++ {
+		resp, err := executors.FetchPositionEventsPageDesc(client, symbol, continuation)
+		if err != nil {
+			return nil, err
+		}
+		for _, ev := range resp.Elements {
+			upd := ev.Event.PositionUpdate
+			if upd.Timestamp == 0 {
+				upd.Timestamp = ev.Timestamp
+			}
+			if upd.NewPosition.Float64() != upd.OldPosition.Float64() {
+				collected = append(collected, upd)
+			}
+			if builders.IsOpeningEvent(upd) {
+				for i, j := 0, len(collected)-1; i < j; i, j = i+1, j-1 {
+					collected[i], collected[j] = collected[j], collected[i]
+				}
+				return collected, nil
+			}
+		}
+		if resp.ContinuationToken == "" || len(resp.Elements) == 0 {
+			break
+		}
+		continuation = resp.ContinuationToken
+	}
+	return nil, nil
+}
+
+func eventMs(upd models.PositionUpdate) int64 {
+	if upd.FillTime != 0 {
+		return upd.FillTime
+	}
+	return upd.Timestamp
 }
 
 // CollectOpenFills pages fills newest first until the walker seeded with the
