@@ -41,9 +41,16 @@ type FillSegmenter struct {
 	walker *reverse.Walker[models.Trade]
 }
 
+// NewFillSegmenter seeds the walker with the live open positions up front, so
+// Resolved() is false until every one of them has been walked back to zero,
+// even for a symbol that has not produced a fill yet.
 func NewFillSegmenter(openPositions []models.PositionRisk) *FillSegmenter {
-	seed := reverse.SeedFromMap(SeedFromOpenPositions(openPositions))
-	return &FillSegmenter{walker: reverse.NewWalker[models.Trade](seed)}
+	seeds := SeedFromOpenPositions(openPositions)
+	walker := reverse.NewWalker[models.Trade](reverse.SeedFromMap(seeds))
+	for key, size := range seeds {
+		walker.Seed(key, size)
+	}
+	return &FillSegmenter{walker: walker}
 }
 
 func (s *FillSegmenter) PushOlderBatch(fills []models.Trade) [][]models.Trade {
@@ -71,4 +78,26 @@ func (s *FillSegmenter) PushOlderBatch(fills []models.Trade) [][]models.Trade {
 
 func (s *FillSegmenter) Flat() bool {
 	return s.walker.Flat()
+}
+
+// Resolved reports whether every seeded open position has been walked back to
+// its opening fill.
+func (s *FillSegmenter) Resolved() bool {
+	return s.walker.Resolved()
+}
+
+// OpenFills returns, oldest first, the fills that belong to the seeded open
+// positions.
+func (s *FillSegmenter) OpenFills() []models.Trade {
+	var out []models.Trade
+	for _, fills := range s.walker.Pending() {
+		out = append(out, fills...)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Time == out[j].Time {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].Time < out[j].Time
+	})
+	return out
 }

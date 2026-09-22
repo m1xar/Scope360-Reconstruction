@@ -13,6 +13,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/binance/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/binance/service/reconstructor/workers"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
 )
 
 const (
@@ -152,23 +153,90 @@ func forEachSymbol[T any](symbols []string, fn func(symbol string) ([]T, error))
 	return all, nil
 }
 
-func CollectFills(client *resty.Client, symbols []string) ([]models.Trade, error) {
-	fills, err := forEachSymbol(symbols, func(symbol string) ([]models.Trade, error) {
-		return executors.FetchAllUserTrades(client, symbol)
-	})
-	if err != nil {
-		return nil, err
+// symbolWalk is the result of walking one symbol's trades newest first.
+type symbolWalk struct {
+	groups    [][]models.Trade // closed episodes, each oldest first
+	openFills []models.Trade   // fills of the still-open positions
+}
+
+// walkSymbolFills walks a symbol's trades backwards in 7-day windows. With a
+// cutoff it stops once the window is past it and no episode is left half
+// walked, so positions that straddle the cutoff are still completed. With
+// untilResolved it stops as soon as every open position seeded from
+// openPositions has been walked back to its opening fill. Without either it
+// walks to the retention floor.
+func walkSymbolFills(
+	fetch func(startMs, endMs int64) ([]models.Trade, error),
+	symbol string,
+	openPositions []models.PositionRisk,
+	cutoff *time.Time,
+	untilResolved bool,
+) (symbolWalk, error) {
+	var own []models.PositionRisk
+	for _, p := range openPositions {
+		if p.Symbol == symbol {
+			own = append(own, p)
+		}
+	}
+	segmenter := helpers.NewFillSegmenter(own)
+
+	cutoffMs := int64(0)
+	if cutoff != nil {
+		cutoffMs = cutoff.UnixMilli()
 	}
 
-	sort.SliceStable(fills, func(i, j int) bool {
-		if fills[i].Time == fills[j].Time {
-			return fills[i].ID < fills[j].ID
+	var walk symbolWalk
+	now := time.Now().UnixMilli()
+	for _, span := range window.Backward(now, now-window.Retention.Milliseconds(), executors.TradesWindowMax.Milliseconds()) {
+		if untilResolved && segmenter.Resolved() {
+			break
 		}
-		return fills[i].Time < fills[j].Time
-	})
+		if cutoff != nil && span.EndMs < cutoffMs && segmenter.Flat() {
+			break
+		}
 
-	helpers.NormalizeFees(client, fills)
-	return fills, nil
+		fills, err := fetch(span.StartMs, span.EndMs)
+		if err != nil {
+			return symbolWalk{}, err
+		}
+		walk.groups = append(walk.groups, segmenter.PushOlderBatch(fills)...)
+	}
+	walk.openFills = segmenter.OpenFills()
+	return walk, nil
+}
+
+func collectWalks(
+	client *resty.Client,
+	symbols []string,
+	openPositions []models.PositionRisk,
+	cutoff *time.Time,
+	untilResolved bool,
+) ([]symbolWalk, error) {
+	return forEachSymbol(symbols, func(symbol string) ([]symbolWalk, error) {
+		walk, err := walkSymbolFills(func(startMs, endMs int64) ([]models.Trade, error) {
+			return executors.FetchUserTradesWindow(client, symbol, startMs, endMs)
+		}, symbol, openPositions, cutoff, untilResolved)
+		if err != nil {
+			return nil, err
+		}
+		return []symbolWalk{walk}, nil
+	})
+}
+
+// normalizeGroupFees converts non-stable commissions of every fill in groups
+// in one pass (the converter caches klines across symbols).
+func normalizeGroupFees(client *resty.Client, groups [][]models.Trade) {
+	flat := groupFills(groups)
+	helpers.NormalizeFees(client, flat)
+	byID := make(map[int64]models.Trade, len(flat))
+	for _, f := range flat {
+		byID[f.ID] = f
+	}
+	for _, g := range groups {
+		for i := range g {
+			g[i] = byID[g[i].ID]
+		}
+	}
 }
 
 func collectOrders(client *resty.Client, fills []models.Trade) ([]models.Order, error) {
@@ -188,11 +256,6 @@ func collectOrders(client *resty.Client, fills []models.Trade) ([]models.Order, 
 	return forEachSymbol(symbols, func(symbol string) ([]models.Order, error) {
 		return executors.FetchOrdersFrom(client, symbol, minOrder[symbol])
 	})
-}
-
-func SegmentFills(fills []models.Trade, openPositions []models.PositionRisk) [][]models.Trade {
-	segmenter := helpers.NewFillSegmenter(openPositions)
-	return segmenter.PushOlderBatch(fills)
 }
 
 func GroupsClosedAfter(groups [][]models.Trade, cutoff *time.Time) [][]models.Trade {
@@ -282,7 +345,14 @@ func ReconstructClosedPositions(
 		return nil, err
 	}
 
-	ledger, err := LoadLedger(client, 0)
+	// Any position closed after the cutoff left REALIZED_PNL/COMMISSION
+	// income after it, so income from the cutoff is enough to find the
+	// symbols to walk. cutoff == nil keeps the full retention.
+	ledgerStartMs := int64(0)
+	if cutoff != nil {
+		ledgerStartMs = cutoff.UnixMilli()
+	}
+	ledger, err := LoadLedger(client, ledgerStartMs)
 	if err != nil {
 		return nil, err
 	}
@@ -292,14 +362,36 @@ func ReconstructClosedPositions(
 		return []domain.Position{}, nil
 	}
 
-	fills, err := CollectFills(client, symbols)
+	walks, err := collectWalks(client, symbols, openPositions, cutoff, false)
 	if err != nil {
 		return nil, err
 	}
-
-	groups := GroupsClosedAfter(SegmentFills(fills, openPositions), cutoff)
+	var groups [][]models.Trade
+	for _, w := range walks {
+		groups = append(groups, w.groups...)
+	}
+	groups = GroupsClosedAfter(groups, cutoff)
 	if len(groups) == 0 {
 		return []domain.Position{}, nil
+	}
+	normalizeGroupFees(client, groups)
+
+	// A surviving position may have opened before the cutoff: extend the
+	// ledger back to its open for funding, insurance fees and balance.
+	if cutoff != nil {
+		earliestMs := groups[0][0].Time
+		for _, g := range groups {
+			if g[0].Time < earliestMs {
+				earliestMs = g[0].Time
+			}
+		}
+		if earliestMs < ledgerStartMs {
+			earlier, err := executors.FetchAllIncome(client, earliestMs, ledgerStartMs-1, "")
+			if err != nil {
+				return nil, err
+			}
+			ledger = helpers.BuildLedger(append(earlier, ledger.Entries...))
+		}
 	}
 
 	symbolCfg := fetchSymbolConfigLenient(client)
@@ -358,17 +450,15 @@ func ReconstructOpenPositions(client *resty.Client) ([]domain.OpenPosition, erro
 
 	symbolCfg := fetchSymbolConfigLenient(client)
 
-	fills, err := CollectFills(client, unionSymbols(nil, raw))
+	walks, err := collectWalks(client, unionSymbols(nil, raw), raw, nil, true)
 	if err != nil {
 		return nil, err
 	}
-
 	var openFills []models.Trade
-	for _, ep := range helpers.OpenEpisodes(fills) {
-		for _, part := range ep.Parts {
-			openFills = append(openFills, part.Fill)
-		}
+	for _, w := range walks {
+		openFills = append(openFills, w.openFills...)
 	}
+	helpers.NormalizeFees(client, openFills)
 
 	var orders []models.Order
 	if len(openFills) > 0 {
@@ -378,5 +468,5 @@ func ReconstructOpenPositions(client *resty.Client) ([]domain.OpenPosition, erro
 		}
 	}
 
-	return builders.BuildOpenPositions(raw, fills, helpers.IndexOrdersByID(orders), symbolCfg), nil
+	return builders.BuildOpenPositions(raw, openFills, helpers.IndexOrdersByID(orders), symbolCfg), nil
 }

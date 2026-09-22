@@ -3,6 +3,7 @@ package executors
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/m1xar/scope360-reconstruction/pkg/binance/connector/binance"
@@ -13,30 +14,23 @@ const userTradesPath = "/fapi/v1/userTrades"
 
 const tradesPageLimit = 1000
 
-func FetchAllUserTrades(client *resty.Client, symbol string) ([]models.Trade, error) {
-	fills, err := fetchTradesByID(client, symbol, 0)
-	if err != nil {
-		return nil, err
-	}
+// TradesWindowMax is the widest startTime/endTime span userTrades accepts.
+const TradesWindowMax = 7 * 24 * time.Hour
 
-	sort.SliceStable(fills, func(i, j int) bool {
-		if fills[i].Time == fills[j].Time {
-			return fills[i].ID < fills[j].ID
-		}
-		return fills[i].Time < fills[j].Time
-	})
-	return fills, nil
-}
-
-func fetchTradesByID(client *resty.Client, symbol string, fromID int64) ([]models.Trade, error) {
+// FetchUserTradesWindow returns the trades of symbol with startMs <= time <=
+// endMs (a span of at most TradesWindowMax), oldest first. fromId cannot be
+// combined with a time range, so pages advance by startTime.
+func FetchUserTradesWindow(client *resty.Client, symbol string, startMs, endMs int64) ([]models.Trade, error) {
 	var result []models.Trade
 	seen := make(map[int64]struct{})
+	cursor := startMs
 
-	for {
+	for cursor <= endMs {
 		params := map[string]string{
-			"symbol": symbol,
-			"fromId": fmt.Sprint(fromID),
-			"limit":  fmt.Sprintf("%d", tradesPageLimit),
+			"symbol":    symbol,
+			"startTime": fmt.Sprint(cursor),
+			"endTime":   fmt.Sprint(endMs),
+			"limit":     fmt.Sprintf("%d", tradesPageLimit),
 		}
 
 		page, err := doWithRateLimit(func() ([]models.Trade, error) {
@@ -53,10 +47,10 @@ func fetchTradesByID(client *resty.Client, symbol string, fromID int64) ([]model
 		}
 
 		added := 0
-		maxID := int64(0)
+		maxTs := int64(0)
 		for _, fill := range page {
-			if fill.ID > maxID {
-				maxID = fill.ID
+			if fill.Time > maxTs {
+				maxTs = fill.Time
 			}
 			if _, ok := seen[fill.ID]; ok {
 				continue
@@ -66,11 +60,17 @@ func fetchTradesByID(client *resty.Client, symbol string, fromID int64) ([]model
 			added++
 		}
 
-		if len(page) < tradesPageLimit || added == 0 || maxID < fromID {
+		if len(page) < tradesPageLimit || added == 0 || maxTs <= cursor {
 			break
 		}
-		fromID = maxID + 1
+		cursor = maxTs
 	}
 
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].Time == result[j].Time {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].Time < result[j].Time
+	})
 	return result, nil
 }
