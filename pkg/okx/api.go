@@ -2,6 +2,7 @@ package okx
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -31,7 +32,7 @@ func GetClosedPositionByExactMatch(
 	openedAt time.Time,
 	side string,
 ) (*domain.Position, error) {
-	positions, err := GetBuiltPositions(client, creds, baseURL, 0)
+	positions, err := GetBuiltPositions(client, creds, baseURL, daysSince(openedAt))
 	if err != nil {
 		return nil, err
 	}
@@ -207,4 +208,10 @@ func GetOpenPositions(
 	okxclient.AttachAuth(client, creds)
 
 	return reconstructor.ReconstructOpenPositions(client, baseURL)
+}
+
+// daysSince bounds a lookup for a position opened at t: it must have closed
+// after it opened, so the window only needs to reach back to t.
+func daysSince(t time.Time) int {
+	return int(math.Ceil(time.Since(t).Hours()/24)) + 1
 }

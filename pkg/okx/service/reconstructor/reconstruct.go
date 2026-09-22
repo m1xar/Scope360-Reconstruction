@@ -27,13 +27,24 @@ func ReconstructClosedPositions(
 	baseURL string,
 	days int,
 ) ([]domain.Position, error) {
-	closedPositions, err := executors.FetchAllClosedPositions(client, baseURL)
+	cutoff := helpers.CutoffFromDays(days)
+	sinceMs := int64(0)
+	if cutoff != nil {
+		sinceMs = cutoff.UnixMilli()
+	}
+
+	closedPositions, err := executors.FetchAllClosedPositions(client, baseURL, sinceMs)
 	if err != nil {
 		return nil, err
 	}
+	closedPositions = closedPositionsAfter(closedPositions, sinceMs)
 	if len(closedPositions) == 0 {
 		return []domain.Position{}, nil
 	}
+
+	// Everything below (orders, fills, candles, bills) is fetched from the
+	// open time of the oldest surviving position, not from the cutoff: a
+	// position closed inside the window may have been opened long before it.
 
 	oldestMs := helpers.MustInt64(closedPositions[0].CTime)
 	for _, cp := range closedPositions[1:] {
@@ -130,17 +141,6 @@ func ReconstructClosedPositions(
 		return positions[i].ClosedAt.Before(*positions[j].ClosedAt)
 	})
 
-	cutoff := helpers.CutoffFromDays(days)
-	if cutoff != nil {
-		trimmed := positions[:0]
-		for _, pos := range positions {
-			if pos.ClosedAt != nil && !pos.ClosedAt.Before(*cutoff) {
-				trimmed = append(trimmed, pos)
-			}
-		}
-		positions = trimmed
-	}
-
 	balance, err := executors.FetchBalance(client, baseURL)
 	if err == nil {
 		currentBal := helpers.MustFloat(balance.TotalEq)
@@ -152,6 +152,19 @@ func ReconstructClosedPositions(
 	}
 
 	return positions, nil
+}
+
+func closedPositionsAfter(positions []models.ClosedPosition, sinceMs int64) []models.ClosedPosition {
+	if sinceMs <= 0 {
+		return positions
+	}
+	kept := positions[:0]
+	for _, cp := range positions {
+		if helpers.MustInt64(cp.UTime) >= sinceMs {
+			kept = append(kept, cp)
+		}
+	}
+	return kept
 }
 
 func ReconstructOpenPositions(

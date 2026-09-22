@@ -17,10 +17,16 @@ const positionsPageLimit = 100
 
 const positionsMaxAge = 90 * 24 * time.Hour
 
-func FetchAllClosedPositionsByInstType(client *resty.Client, baseURL, instType string) ([]models.ClosedPosition, error) {
+// FetchAllClosedPositionsByInstType pages positions-history newest first and
+// stops at the first position closed before sinceMs (or before the API's
+// 90-day retention when sinceMs is 0).
+func FetchAllClosedPositionsByInstType(client *resty.Client, baseURL, instType string, sinceMs int64) ([]models.ClosedPosition, error) {
 	var result []models.ClosedPosition
 	after := ""
 	cutoffMs := time.Now().Add(-positionsMaxAge).UnixMilli()
+	if sinceMs > cutoffMs {
+		cutoffMs = sinceMs
+	}
 
 	for {
 		params := map[string]string{
@@ -66,7 +72,7 @@ func FetchAllClosedPositionsByInstType(client *resty.Client, baseURL, instType s
 	return result, nil
 }
 
-func FetchAllClosedPositions(client *resty.Client, baseURL string) ([]models.ClosedPosition, error) {
+func FetchAllClosedPositions(client *resty.Client, baseURL string, sinceMs int64) ([]models.ClosedPosition, error) {
 	var swapPositions, futuresPositions []models.ClosedPosition
 	var swapErr, futuresErr error
 	var wg sync.WaitGroup
@@ -74,11 +80,11 @@ func FetchAllClosedPositions(client *resty.Client, baseURL string) ([]models.Clo
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		swapPositions, swapErr = FetchAllClosedPositionsByInstType(client, baseURL, "SWAP")
+		swapPositions, swapErr = FetchAllClosedPositionsByInstType(client, baseURL, "SWAP", sinceMs)
 	}()
 	go func() {
 		defer wg.Done()
-		futuresPositions, futuresErr = FetchAllClosedPositionsByInstType(client, baseURL, "FUTURES")
+		futuresPositions, futuresErr = FetchAllClosedPositionsByInstType(client, baseURL, "FUTURES", sinceMs)
 	}()
 	wg.Wait()
 
