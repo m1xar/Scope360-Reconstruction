@@ -1,6 +1,7 @@
 package reconstructor
 
 import (
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -220,7 +221,9 @@ func EnrichOpenPositionOrders(
 		return
 	}
 
-	fills, err := executors.FetchAllFills(client, 0)
+	// Fills before a position's OpenTime are discarded below, so the fetch
+	// only needs to reach back to the oldest open position.
+	fills, err := executors.FetchAllFills(client, daysCovering(positions))
 	if err != nil {
 		return
 	}
@@ -251,6 +254,24 @@ func EnrichOpenPositionOrders(
 		positions[posIdx].Orders = builders.BuildOpenOrdersFromFills(matched, positions[posIdx].ID)
 		posIdx++
 	}
+}
+
+// daysCovering returns the days argument for FetchAllFills that reaches the
+// oldest OpenTime among positions; 0 (full history) when none is known.
+func daysCovering(positions []domain.OpenPosition) int {
+	var oldest time.Time
+	for _, pos := range positions {
+		if pos.OpenTime.IsZero() {
+			return 0
+		}
+		if oldest.IsZero() || pos.OpenTime.Before(oldest) {
+			oldest = pos.OpenTime
+		}
+	}
+	if oldest.IsZero() {
+		return 0
+	}
+	return int(math.Ceil(time.Since(oldest).Hours()/24)) + 1
 }
 
 func ReconstructClosedPositions(
