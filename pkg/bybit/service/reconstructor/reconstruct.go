@@ -96,8 +96,16 @@ func CollectWeeks(
 		cutoffMs = cutoff.UnixMilli()
 	}
 
-	for i := 0; i < len(windows); i += weekChunk {
-		batch := windows[i:min(i+weekChunk, len(windows))]
+	for i := 0; i < len(windows); {
+		// Weeks inside the cutoff window are all needed and fetched in
+		// parallel chunks; past the cutoff the walk may stop after any
+		// week, so fetch one at a time instead of overshooting by a chunk.
+		chunk := weekChunk
+		if !untilResolved && cutoff != nil && windows[i].EndMs < cutoffMs {
+			chunk = 1
+		}
+		batch := windows[i:min(i+chunk, len(windows))]
+		i += chunk
 		results := make([]weekData, len(batch))
 
 		var wg sync.WaitGroup
