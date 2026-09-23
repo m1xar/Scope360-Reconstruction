@@ -39,20 +39,7 @@ func BuildPosition(
 
 	lever := uint32(MustFloat(cp.Lever))
 
-	var sl, tp *float64
-	for _, ord := range orders {
-		if !IsFilled(ord) {
-			continue
-		}
-		if v := MustFloat(ord.SlTriggerPx); v > 0 && sl == nil {
-			rounded := Round8(v)
-			sl = &rounded
-		}
-		if v := MustFloat(ord.TpTriggerPx); v > 0 && tp == nil {
-			rounded := Round8(v)
-			tp = &rounded
-		}
-	}
+	tp, sl := ProtectiveLevels(orders, side)
 
 	var rr, rrPlanned *float64
 	if sl != nil {
@@ -273,4 +260,38 @@ func ApplyMAEMFE(pos *domain.Position, high, low *float64) {
 	}
 
 	pos.MAE, pos.MFE = excursion.Compute(pos.Side, entry, amount, high, low, pos.Pnl, pos.NetPnl)
+}
+
+func ProtectiveLevels(orders []models.Order, side string) (tp, sl *float64) {
+	entrySide := "buy"
+	if side == "SHORT" {
+		entrySide = "sell"
+	}
+	for _, pass := range []bool{true, false} {
+		for _, ord := range orders {
+			if !IsFilled(ord) || (pass && !strings.EqualFold(ord.Side, entrySide)) {
+				continue
+			}
+			for _, attach := range ord.AttachAlgoOrds {
+				applyLevel(&tp, attach.TpTriggerPx)
+				applyLevel(&sl, attach.SlTriggerPx)
+			}
+			applyLevel(&tp, ord.TpTriggerPx)
+			applyLevel(&sl, ord.SlTriggerPx)
+		}
+		if tp != nil || sl != nil {
+			return tp, sl
+		}
+	}
+	return tp, sl
+}
+
+func applyLevel(dst **float64, raw string) {
+	if *dst != nil {
+		return
+	}
+	if v := MustFloat(raw); v > 0 {
+		rounded := Round8(v)
+		*dst = &rounded
+	}
 }

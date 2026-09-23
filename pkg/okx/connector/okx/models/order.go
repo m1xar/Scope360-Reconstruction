@@ -27,4 +27,16 @@ type Order struct {
 	TdMode      string `json:"tdMode"`
 	CTime       string `json:"cTime"`
 	UTime       string `json:"uTime"`
+
+	AttachAlgoOrds []AttachAlgoOrd `json:"attachAlgoOrds"`
+}
+
+type AttachAlgoOrd struct {
+	AttachAlgoId    string `json:"attachAlgoId"`
+	TpTriggerPx     string `json:"tpTriggerPx"`
+	TpOrdPx         string `json:"tpOrdPx"`
+	TpTriggerPxType string `json:"tpTriggerPxType"`
+	SlTriggerPx     string `json:"slTriggerPx"`
+	SlOrdPx         string `json:"slOrdPx"`
+	SlTriggerPxType string `json:"slTriggerPxType"`
 }
