@@ -2,6 +2,7 @@ package kraken
 
 import (
 	"fmt"
+	"github.com/m1xar/scope360-reconstruction/pkg/kraken/service/symbols"
 	"sort"
 	"time"
 
@@ -87,10 +88,10 @@ func GetClosedPositionByExactMatch(
 		return nil, err
 	}
 
-	pair = helpers.NormalizePairText(pair)
+	key := symbols.Key(pair)
 	for i := range positions {
 		pos := &positions[i]
-		if pos.Pair == pair && pos.Side == side && pos.CreatedAt.Equal(openedAt) {
+		if symbols.Key(pos.Pair) == key && pos.Side == side && pos.CreatedAt.Equal(openedAt) {
 			return pos, nil
 		}
 	}
@@ -190,6 +191,11 @@ func GetCandles(
 	if endTime.Before(startTime) {
 		return nil, fmt.Errorf("endTime must be >= startTime")
 	}
+
+	symbol, err := symbols.Denormalize(client, symbol)
+	if err != nil {
+		return nil, err
+	}
 	if tickType == "" {
 		tickType = "trade"
 	}
@@ -202,4 +208,15 @@ func GetCandles(
 		startTime.UnixMilli(),
 		endTime.UnixMilli(),
 	)
+}
+
+func NormalizeSymbol(symbol string) string {
+	return symbols.Normalize(symbol)
+}
+
+func DenormalizeSymbol(client *resty.Client, pair string) (string, error) {
+	if client == nil {
+		client = krakenclient.NewPublicClient()
+	}
+	return symbols.Denormalize(client, pair)
 }

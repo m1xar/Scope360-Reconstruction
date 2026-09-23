@@ -9,6 +9,8 @@ type Instrument struct {
 	CtVal    string `json:"ctVal"`
 	CtMult   string `json:"ctMult"`
 	CtValCcy string `json:"ctValCcy"`
+	State    string `json:"state"`
+	ExpTime  string `json:"expTime"`
 }
 
 type Instrumentidentifier struct {

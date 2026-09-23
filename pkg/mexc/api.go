@@ -2,6 +2,7 @@ package mexc
 
 import (
 	"fmt"
+	"github.com/m1xar/scope360-reconstruction/pkg/mexc/service/symbols"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -81,9 +82,10 @@ func GetClosedPositionByExactMatch(
 		return nil, err
 	}
 
+	key := symbols.Key(pair)
 	for i := range positions {
 		pos := &positions[i]
-		if pos.Pair == pair && pos.Side == side && pos.CreatedAt.Equal(openedAt) {
+		if symbols.Key(pos.Pair) == key && pos.Side == side && pos.CreatedAt.Equal(openedAt) {
 			return pos, nil
 		}
 	}
@@ -166,8 +168,24 @@ func GetCandles(
 		return nil, fmt.Errorf("endTime must be >= startTime")
 	}
 
+	symbol, err := symbols.Denormalize(client, symbol)
+	if err != nil {
+		return nil, err
+	}
+
 	return executors.FetchCandles(
 		client, symbol, interval,
 		startTime.UnixMilli(), endTime.UnixMilli(),
 	)
+}
+
+func NormalizeSymbol(symbol string) string {
+	return symbols.Normalize(symbol)
+}
+
+func DenormalizeSymbol(client *resty.Client, pair string) (string, error) {
+	if client == nil {
+		client = mexcclient.NewPublicClient()
+	}
+	return symbols.Denormalize(client, pair)
 }

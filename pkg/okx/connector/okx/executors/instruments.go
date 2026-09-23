@@ -29,6 +29,10 @@ func FetchInstrument(client *resty.Client, baseURL, instID, instType string) (*m
 	return &data[0], nil
 }
 
+func FetchInstrumentsByType(client *resty.Client, baseURL, instType string) ([]models.Instrument, error) {
+	return okx.DoGet[[]models.Instrument](client, baseURL, instrumentsPath, map[string]string{"instType": instType})
+}
+
 func FetchInstruments(client *resty.Client, baseURL string, identifiers map[string]models.Instrumentidentifier) (map[string]models.Instrument, error) {
 	var (
 		wg          sync.WaitGroup

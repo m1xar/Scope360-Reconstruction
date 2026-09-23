@@ -167,7 +167,10 @@ func EnrichMAEMFE(client *resty.Client, positions *[]domain.Position, symbolByPa
 		}
 
 		replyCh := make(chan helpers.CandleResponse, 1)
-		symbol := symbolByPair[pos.Pair]
+		symbol := pos.Symbol
+		if symbol == "" {
+			symbol = symbolByPair[pos.Pair]
+		}
 		if symbol == "" {
 			symbol = helpers.SymbolFromPair(pos.Pair)
 		}
