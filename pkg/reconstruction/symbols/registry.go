@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 const refreshInterval = 5 * time.Minute
@@ -26,7 +27,7 @@ type Registry struct {
 func Key(s string) string {
 	var b strings.Builder
 	for _, r := range strings.ToUpper(strings.TrimSpace(s)) {
-		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			b.WriteRune(r)
 		}
 	}
