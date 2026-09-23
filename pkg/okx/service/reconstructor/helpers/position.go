@@ -273,11 +273,11 @@ func ProtectiveLevels(orders []models.Order, side string) (tp, sl *float64) {
 				continue
 			}
 			for _, attach := range ord.AttachAlgoOrds {
-				applyLevel(&tp, attach.TpTriggerPx)
-				applyLevel(&sl, attach.SlTriggerPx)
+				applyLevel(&tp, attach.TpTriggerPx, attach.TpOrdPx)
+				applyLevel(&sl, attach.SlTriggerPx, attach.SlOrdPx)
 			}
-			applyLevel(&tp, ord.TpTriggerPx)
-			applyLevel(&sl, ord.SlTriggerPx)
+			applyLevel(&tp, ord.TpTriggerPx, ord.TpOrdPx)
+			applyLevel(&sl, ord.SlTriggerPx, ord.SlOrdPx)
 		}
 		if tp != nil || sl != nil {
 			return tp, sl
@@ -286,12 +286,15 @@ func ProtectiveLevels(orders []models.Order, side string) (tp, sl *float64) {
 	return tp, sl
 }
 
-func applyLevel(dst **float64, raw string) {
+func applyLevel(dst **float64, candidates ...string) {
 	if *dst != nil {
 		return
 	}
-	if v := MustFloat(raw); v > 0 {
-		rounded := Round8(v)
-		*dst = &rounded
+	for _, raw := range candidates {
+		if v := MustFloat(raw); v > 0 {
+			rounded := Round8(v)
+			*dst = &rounded
+			return
+		}
 	}
 }
