@@ -99,6 +99,7 @@ func BuildPosition(
 		ID:               posID,
 		Side:             side,
 		Pair:             NormalizePair(cp.InstId),
+		Symbol:           cp.InstId,
 		Amount:           Round8(amount),
 		EntryPrice:       Round8(entry),
 		ExitPrice:        Round8(exit),

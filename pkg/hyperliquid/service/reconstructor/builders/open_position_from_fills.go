@@ -129,6 +129,7 @@ func BuildOpenPositionsFromFills(
 		out = append(out, domain.OpenPosition{
 			ID:           positionID,
 			Pair:         a.pair,
+			Symbol:       a.coin,
 			Amount:       helpers.Round8(net),
 			Side:         a.side,
 			EntryPrice:   helpers.Round8(entry),

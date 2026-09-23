@@ -27,7 +27,8 @@ func BuildOpenPosition(pos models.OpenPosition, ticker models.Ticker) domain.Ope
 
 	return domain.OpenPosition{
 		ID:           positionID,
-		Pair:         strings.ToUpper(strings.ReplaceAll(pair, "_", "")),
+		Pair:         helpers.NormalizePairText(pair),
+		Symbol:       pos.Symbol,
 		Amount:       helpers.Round8(pos.Size.Float64()),
 		Side:         side,
 		EntryPrice:   helpers.Round8(pos.Price.Float64()),

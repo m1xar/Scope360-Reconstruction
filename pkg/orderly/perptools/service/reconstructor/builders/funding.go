@@ -11,6 +11,7 @@ import (
 func BuildUserFunding(fund models.OrderlyFunding) domain.UserFunding {
 	return domain.UserFunding{
 		Pair:      helpers.NormalizeSymbol(fund.Symbol),
+		Symbol:    fund.Symbol,
 		Amount:    helpers.Round8(fund.FundingFee),
 		CreatedAt: time.UnixMilli(fund.CreatedTime).UTC(),
 	}

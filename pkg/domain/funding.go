@@ -6,6 +6,7 @@ import (
 
 type UserFunding struct {
 	Pair      string
+	Symbol    string
 	Amount    float64
 	CreatedAt time.Time
 }

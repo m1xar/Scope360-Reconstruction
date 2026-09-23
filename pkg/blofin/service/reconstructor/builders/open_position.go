@@ -48,6 +48,7 @@ func buildOpenPosition(
 	return domain.OpenPosition{
 		ID:           positionID,
 		Pair:         helpers.NormalizePair(pos.InstID),
+		Symbol:       pos.InstID,
 		Amount:       helpers.Round8(math.Abs(helpers.ContractsToBase(pos.Positions, instrument))),
 		Multiplier:   uint32(helpers.MustInt64(pos.Leverage)),
 		Side:         side,

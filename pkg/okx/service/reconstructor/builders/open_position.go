@@ -18,6 +18,7 @@ func BuildOpenPosition(pos models.OpenPosition, instrument models.Instrument) do
 	return domain.OpenPosition{
 		ID:           positionID,
 		Pair:         helpers.NormalizePair(pos.InstId),
+		Symbol:       pos.InstId,
 		Amount:       helpers.Round8(math.Abs(helpers.MustFloat(pos.Pos)) * helpers.MustFloat(instrument.CtVal)),
 		Multiplier:   uint32(helpers.MustInt64(pos.Lever)),
 		Side:         helpers.SideFromPosSide(pos.PosSide, pos.Pos),

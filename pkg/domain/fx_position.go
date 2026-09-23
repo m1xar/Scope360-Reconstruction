@@ -8,6 +8,7 @@ type FXPosition struct {
 	ID               string
 	Side             string
 	Pair             string
+	Symbol           string
 	Amount           float64
 	EntryPrice       float64
 	ExitPrice        float64

@@ -32,6 +32,7 @@ func BuildOpenPositions(positions []models.OrderlyPosition) []domain.OpenPositio
 		out = append(out, domain.OpenPosition{
 			ID:           positionID,
 			Pair:         helpers.NormalizeSymbol(p.Symbol),
+			Symbol:       p.Symbol,
 			Amount:       helpers.Round8(math.Abs(p.PositionQty)),
 			Side:         side,
 			EntryPrice:   helpers.Round8(p.AverageOpenPrice),

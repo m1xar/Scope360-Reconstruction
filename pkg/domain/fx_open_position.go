@@ -5,6 +5,7 @@ import "time"
 type FXOpenPosition struct {
 	ID           string
 	Pair         string
+	Symbol       string
 	Amount       float64
 	Side         string
 	EntryPrice   float64

@@ -125,6 +125,7 @@ func BuildPositionFromEnvelope(env envelope.TradeEnvelope) (domain.Position, err
 		ID:         positionID,
 		Side:       side,
 		Pair:       pair,
+		Symbol:     first.Symbol,
 		Amount:     helpers.Round8(amount),
 		EntryPrice: helpers.Round8(entry),
 		ExitPrice:  helpers.Round8(exit),

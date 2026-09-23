@@ -110,6 +110,7 @@ func BuildPosition(
 		ID:               posID,
 		Side:             side,
 		Pair:             helpers.NormalizePair(hp.Symbol),
+		Symbol:           hp.Symbol,
 		Amount:           helpers.Round8(amount),
 		EntryPrice:       helpers.Round8(entry),
 		ExitPrice:        helpers.Round8(exit),

@@ -22,6 +22,7 @@ func BuildFundings(fees []models.FundingFee) []domain.UserFunding {
 
 		fundings = append(fundings, domain.UserFunding{
 			Pair:      helpers.NormalizePair(f.InstID),
+			Symbol:    f.InstID,
 			Amount:    helpers.Round8(amount),
 			CreatedAt: at,
 		})

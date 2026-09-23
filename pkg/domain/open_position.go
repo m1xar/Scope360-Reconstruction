@@ -9,6 +9,7 @@ import (
 type OpenPosition struct {
 	ID           uuid.UUID
 	Pair         string
+	Symbol       string
 	Amount       float64
 	Multiplier   uint32
 	Side         string

@@ -17,6 +17,7 @@ func BuildFundings(logs []models.AccountLog, pairBySymbol map[string]string) []d
 	}
 
 	grouped := make(map[fundingBucket]float64)
+	symbols := make(map[fundingBucket]string)
 	for _, row := range logs {
 		if !strings.EqualFold(row.Asset, "usd") || !row.RealizedFunding.Valid || row.RealizedFunding.Value == 0 {
 			continue
@@ -27,13 +28,18 @@ func BuildFundings(logs []models.AccountLog, pairBySymbol map[string]string) []d
 		}
 		day := time.Date(at.Year(), at.Month(), at.Day(), 0, 0, 0, 0, time.UTC)
 		pair := helpers.NormalizePair(row.Contract, pairBySymbol)
-		grouped[fundingBucket{pair: pair, day: day}] += row.RealizedFunding.Value
+		bucket := fundingBucket{pair: pair, day: day}
+		grouped[bucket] += row.RealizedFunding.Value
+		if _, ok := symbols[bucket]; !ok {
+			symbols[bucket] = row.Contract
+		}
 	}
 
 	out := make([]domain.UserFunding, 0, len(grouped))
 	for bucket, amount := range grouped {
 		out = append(out, domain.UserFunding{
 			Pair:      bucket.pair,
+			Symbol:    symbols[bucket],
 			Amount:    helpers.Round8(amount),
 			CreatedAt: bucket.day,
 		})

@@ -16,6 +16,7 @@ func BuildFundings(ledger *helpers.Ledger) []domain.UserFunding {
 
 		fundings = append(fundings, domain.UserFunding{
 			Pair:      helpers.NormalizePair(f.Symbol),
+			Symbol:    f.Symbol,
 			Amount:    helpers.Round8(amount),
 			CreatedAt: helpers.TimeFromMs(f.TransactionTime.Int64()),
 		})

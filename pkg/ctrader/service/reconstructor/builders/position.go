@@ -97,6 +97,7 @@ func buildFXPosition(
 		ID:          id,
 		Side:        TradeSide(firstOpen.GetTradeSide()),
 		Pair:        helpers.SymbolName(symbols, first.GetSymbolId()),
+		Symbol:      symbols[first.GetSymbolId()],
 		Amount:      amount,
 		EntryPrice:  entryPrice,
 		ExitPrice:   weightedPrice(closing),

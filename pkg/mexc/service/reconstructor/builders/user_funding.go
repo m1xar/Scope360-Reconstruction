@@ -14,6 +14,7 @@ func BuildUserFundings(records []models.FundingRecord) []domain.UserFunding {
 		}
 		result = append(result, domain.UserFunding{
 			Pair:      helpers.NormalizePair(r.Symbol),
+			Symbol:    r.Symbol,
 			Amount:    helpers.Round8(r.Funding),
 			CreatedAt: helpers.TimeFromMs(r.SettleTime),
 		})

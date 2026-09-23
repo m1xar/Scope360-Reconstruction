@@ -29,6 +29,7 @@ func BuildOpenPositions(
 		out = append(out, domain.FXOpenPosition{
 			ID:           id,
 			Pair:         helpers.SymbolName(symbols, tradeData.GetSymbolId()),
+			Symbol:       symbols[tradeData.GetSymbolId()],
 			Amount:       volumeToAmount(tradeData.GetVolume()),
 			Side:         TradeSide(tradeData.GetTradeSide()),
 			EntryPrice:   pos.GetPrice(),

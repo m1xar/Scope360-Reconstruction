@@ -61,6 +61,7 @@ func buildOpenPosition(
 	return domain.OpenPosition{
 		ID:           positionID,
 		Pair:         helpers.NormalizePair(pos.Symbol),
+		Symbol:       pos.Symbol,
 		Amount:       helpers.Round8(math.Abs(helpers.MustFloat(pos.PositionAmt))),
 		Multiplier:   uint32(leverage),
 		Side:         side,

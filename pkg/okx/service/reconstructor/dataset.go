@@ -302,6 +302,7 @@ func (d *Dataset) Fundings() []domain.UserFunding {
 		}
 		fundings = append(fundings, domain.UserFunding{
 			Pair:      helpers.NormalizePair(b.InstId),
+			Symbol:    b.InstId,
 			Amount:    helpers.Round8(amount),
 			CreatedAt: helpers.TimeFromMs(b.Ts),
 		})

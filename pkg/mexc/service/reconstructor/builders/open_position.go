@@ -16,6 +16,7 @@ func BuildOpenPosition(pos models.OpenPosition) domain.OpenPosition {
 	return domain.OpenPosition{
 		ID:         positionID,
 		Pair:       helpers.NormalizePair(pos.Symbol),
+		Symbol:     pos.Symbol,
 		Amount:     helpers.Round8(pos.HoldVol),
 		Side:       helpers.SideFromPositionType(pos.PositionType),
 		EntryPrice: helpers.Round8(pos.OpenAvgPrice),

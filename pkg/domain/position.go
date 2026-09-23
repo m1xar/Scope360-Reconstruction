@@ -10,6 +10,7 @@ type Position struct {
 	ID               uuid.UUID
 	Side             string
 	Pair             string
+	Symbol           string
 	Amount           float64
 	EntryPrice       float64
 	ExitPrice        float64
