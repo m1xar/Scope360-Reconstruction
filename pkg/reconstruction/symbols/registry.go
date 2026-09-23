@@ -97,11 +97,12 @@ func (r *Registry) add(e Entry) {
 		return
 	}
 	r.symbols[e.Symbol] = struct{}{}
-	key := Key(e.Pair)
-	if key == "" {
-		return
-	}
-	if _, ok := r.byKey[key]; !ok {
-		r.byKey[key] = e.Symbol
+	for _, key := range []string{Key(e.Pair), Key(e.Symbol)} {
+		if key == "" {
+			continue
+		}
+		if _, ok := r.byKey[key]; !ok {
+			r.byKey[key] = e.Symbol
+		}
 	}
 }

@@ -170,9 +170,8 @@ func GetCandles(
 		return nil, fmt.Errorf("endTime must be >= startTime")
 	}
 
-	instID, err := symbols.Denormalize(client, instID)
-	if err != nil {
-		return nil, err
+	if resolved, err := symbols.Denormalize(client, instID); err == nil {
+		instID = resolved
 	}
 
 	return executors.FetchCandles(

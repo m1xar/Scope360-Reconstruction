@@ -31,7 +31,7 @@ func BuildFundings(logs []models.AccountLog, pairBySymbol map[string]string) []d
 		bucket := fundingBucket{pair: pair, day: day}
 		grouped[bucket] += row.RealizedFunding.Value
 		if _, ok := symbols[bucket]; !ok {
-			symbols[bucket] = row.Contract
+			symbols[bucket] = strings.ToUpper(strings.TrimSpace(row.Contract))
 		}
 	}
 

@@ -50,7 +50,9 @@ ctrader.DenormalizeSymbol(client, cfg, pair)     // имя символа бро
 
 `GetCandles` и `GetClosedPositionByExactMatch` теперь принимают и
 нормализованный, и оригинальный символ: `GetCandles` первым делом
-вызывает `DenormalizeSymbol`, `ExactMatch` сравнивает пары по общему ключу
+вызывает `DenormalizeSymbol` (если резолв не удался — например, контракт
+делистнут и его нет ни в seed, ни в живом списке, — символ уходит на биржу
+как есть), `ExactMatch` сравнивает пары по общему ключу
 (верхний регистр, только буквы и цифры). У Orderly `GetCandles` по-прежнему
 принимает и голый `coin` (`BTC` → `PERP_BTC_USDC`).
 

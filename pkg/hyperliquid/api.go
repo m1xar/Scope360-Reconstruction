@@ -155,9 +155,8 @@ func GetCandles(
 		return nil, errors.New("endTime must be >= startTime")
 	}
 
-	coin, err := symbols.Denormalize(client, endpoint, coin)
-	if err != nil {
-		return nil, err
+	if resolved, err := symbols.Denormalize(client, endpoint, coin); err == nil {
+		coin = resolved
 	}
 
 	intervalMs, err := helpers.IntervalToMs(interval)
