@@ -3,6 +3,7 @@ package ctrader
 import (
 	"context"
 	"fmt"
+	registry "github.com/m1xar/scope360-reconstruction/pkg/reconstruction/symbols"
 	"time"
 
 	connector "github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader"
@@ -91,9 +92,10 @@ func GetClosedPositionByExactMatch(
 	if err != nil {
 		return nil, err
 	}
+	key := registry.Key(pair)
 	for i := range positions {
 		pos := &positions[i]
-		if pos.Pair == pair && pos.Side == side && pos.CreatedAt.Equal(openedAt) {
+		if registry.Key(pos.Pair) == key && pos.Side == side && pos.CreatedAt.Equal(openedAt) {
 			return pos, nil
 		}
 	}
@@ -199,4 +201,22 @@ func GetCandles(
 		return nil, err
 	}
 	return helpers.CandlesFromTrendbars(pair, interval, bars), nil
+}
+
+func NormalizeSymbol(symbolName string) string {
+	return helpers.NormalizePair(symbolName)
+}
+
+func DenormalizeSymbol(client *connector.Client, cfg connector.Config, pair string) (string, error) {
+	ctx := context.Background()
+	c := newClient(client, cfg)
+	symbols, err := executors.FetchLightSymbols(ctx, c)
+	if err != nil {
+		return "", err
+	}
+	name, ok := helpers.SymbolNameByPair(symbols, pair)
+	if !ok {
+		return "", fmt.Errorf("symbol %q not found", pair)
+	}
+	return name, nil
 }

@@ -2,6 +2,7 @@ package hyperliquid
 
 import (
 	"errors"
+	"github.com/m1xar/scope360-reconstruction/pkg/hyperliquid/service/symbols"
 	"sort"
 	"time"
 
@@ -154,6 +155,11 @@ func GetCandles(
 		return nil, errors.New("endTime must be >= startTime")
 	}
 
+	coin, err := symbols.Denormalize(client, endpoint, coin)
+	if err != nil {
+		return nil, err
+	}
+
 	intervalMs, err := helpers.IntervalToMs(interval)
 	if err != nil {
 		return nil, err
@@ -256,4 +262,15 @@ func GetOpenPositions(
 		return nil, err
 	}
 	return d.OpenPositions()
+}
+
+func NormalizeSymbol(coin string) string {
+	return symbols.Normalize(coin)
+}
+
+func DenormalizeSymbol(client *resty.Client, endpoint string, pair string) (string, error) {
+	if client == nil {
+		client = newDefaultClient()
+	}
+	return symbols.Denormalize(client, endpoint, pair)
 }

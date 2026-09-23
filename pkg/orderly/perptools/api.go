@@ -2,6 +2,7 @@ package perptools
 
 import (
 	"errors"
+	"github.com/m1xar/scope360-reconstruction/pkg/orderly/perptools/service/symbols"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -67,9 +68,9 @@ func GetClosedPositionByExactMatch(
 		return nil, err
 	}
 
-	normalizedPair := helpers.NormalizeSymbol(helpers.SymbolFromPair(pair))
+	key := symbols.Key(pair)
 	for _, pos := range positions {
-		if pos.Pair == normalizedPair && pos.Side == side && pos.CreatedAt.Equal(openedAt) {
+		if symbols.Key(pos.Pair) == key && pos.Side == side && pos.CreatedAt.Equal(openedAt) {
 			matched := pos
 			return &matched, nil
 		}
@@ -128,7 +129,10 @@ func GetCandles(
 		return nil, errors.New("endTime must be >= startTime")
 	}
 
-	symbol := "PERP_" + coin + "_USDC"
+	symbol, err := symbols.Denormalize(c, coin)
+	if err != nil {
+		symbol = helpers.SymbolFromPair(coin)
+	}
 	startMs := startTime.UnixMilli()
 	endMs := endTime.UnixMilli()
 
@@ -151,4 +155,12 @@ func GetOpenPositions(client *resty.Client, cfg connector.Config) ([]domain.Open
 func ValidateWalletSubscription(address, signature, message string) (bool, error) {
 	ok := connector.VerifyWalletSignature(address, signature, message)
 	return ok, nil
+}
+
+func NormalizeSymbol(symbol string) string {
+	return symbols.Normalize(symbol)
+}
+
+func DenormalizeSymbol(client *resty.Client, cfg connector.Config, pair string) (string, error) {
+	return symbols.Denormalize(newClient(client, cfg), pair)
 }

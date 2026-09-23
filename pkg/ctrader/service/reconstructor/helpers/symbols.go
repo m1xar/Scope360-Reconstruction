@@ -23,3 +23,18 @@ func SymbolIDByPair(symbols []*pb.ProtoOALightSymbol, pair string) (int64, bool)
 	}
 	return 0, false
 }
+
+func NormalizePair(name string) string {
+	return strings.ReplaceAll(strings.TrimSpace(name), "/", "")
+}
+
+func SymbolNameByPair(symbols []*pb.ProtoOALightSymbol, pair string) (string, bool) {
+	normalized := strings.ToUpper(NormalizePair(pair))
+	for _, symbol := range symbols {
+		name := strings.TrimSpace(symbol.GetSymbolName())
+		if strings.ToUpper(NormalizePair(name)) == normalized {
+			return name, true
+		}
+	}
+	return "", false
+}
