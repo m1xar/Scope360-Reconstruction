@@ -66,7 +66,8 @@ ctrader.DenormalizeSymbol(client, cfg, pair)     // имя символа бро
   без единого запроса.
 * `Universe(client, …)` — живой список инструментов с биржи:
   OKX `/public/instruments` (SWAP, затем FUTURES), Binance `exchangeInfo`,
-  Bybit `instruments-info` (linear), BloFin `/market/instruments`, Kraken
+  Bybit `instruments-info` (linear: торгуемые, затем `status=Closed` —
+  делистнутые, свечи за период торгов у них есть), BloFin `/market/instruments`, Kraken
   `/tickers` (symbol + pair), MEXC `/contract/detail`, Hyperliquid
   `{"type":"meta"}`, Orderly `/v1/public/info`. Все публичные.
 * `Denormalize` = `Registry.Resolve(pair, Universe)`.

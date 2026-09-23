@@ -11,9 +11,15 @@ const (
 )
 
 func FetchInstruments(client *resty.Client) (map[string]models.Instrument, error) {
-	rows, err := collectCursor[models.Instrument](client, instrumentsPath, map[string]string{
-		"category": models.CategoryLinear,
-	}, instrumentsPageLimit)
+	return FetchInstrumentsByStatus(client, "")
+}
+
+func FetchInstrumentsByStatus(client *resty.Client, status string) (map[string]models.Instrument, error) {
+	params := map[string]string{"category": models.CategoryLinear}
+	if status != "" {
+		params["status"] = status
+	}
+	rows, err := collectCursor[models.Instrument](client, instrumentsPath, params, instrumentsPageLimit)
 	if err != nil {
 		return nil, err
 	}

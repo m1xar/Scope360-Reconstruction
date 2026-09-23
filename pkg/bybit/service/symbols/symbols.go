@@ -25,13 +25,22 @@ func Key(s string) string {
 }
 
 func Universe(client *resty.Client) ([]registry.Entry, error) {
-	instruments, err := executors.FetchInstruments(client)
+	trading, err := executors.FetchInstruments(client)
 	if err != nil {
 		return nil, err
 	}
-	rows := make([]models.Instrument, 0, len(instruments))
-	for _, inst := range instruments {
+	closed, err := executors.FetchInstrumentsByStatus(client, "Closed")
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]models.Instrument, 0, len(trading)+len(closed))
+	for _, inst := range trading {
 		rows = append(rows, inst)
+	}
+	for symbol, inst := range closed {
+		if _, ok := trading[symbol]; !ok {
+			rows = append(rows, inst)
+		}
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		ri, rj := rank(rows[i]), rank(rows[j])
