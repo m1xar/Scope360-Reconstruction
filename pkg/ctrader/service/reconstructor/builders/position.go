@@ -1,6 +1,7 @@
 package builders
 
 import (
+	"math"
 	"sort"
 	"strconv"
 
@@ -8,135 +9,138 @@ import (
 	pb "github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader/proto"
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/fx"
 )
 
 func BuildFXPositions(
 	deals []*pb.ProtoOADeal,
 	orders []*pb.ProtoOAOrder,
-	symbols map[int64]string,
+	openIDs map[int64]bool,
+	symbols helpers.Symbols,
 	session *connector.Session,
 ) []domain.FXPosition {
 	groupedDeals := make(map[int64][]*pb.ProtoOADeal)
 	for _, deal := range deals {
-		if deal == nil || deal.GetDealStatus() != pb.ProtoOADealStatus_FILLED {
-			continue
+		if deal.GetDealStatus() == pb.ProtoOADealStatus_FILLED {
+			groupedDeals[deal.GetPositionId()] = append(groupedDeals[deal.GetPositionId()], deal)
 		}
-		groupedDeals[deal.GetPositionId()] = append(groupedDeals[deal.GetPositionId()], deal)
 	}
 	groupedOrders := make(map[int64][]*pb.ProtoOAOrder)
 	for _, order := range orders {
-		if order == nil {
-			continue
-		}
 		groupedOrders[order.GetPositionId()] = append(groupedOrders[order.GetPositionId()], order)
 	}
 
 	positions := make([]domain.FXPosition, 0, len(groupedDeals))
 	for positionID, positionDeals := range groupedDeals {
 		sortDeals(positionDeals)
-		if !hasCloseDeal(positionDeals) {
+		opening, closing := splitDeals(positionDeals)
+		if len(closing) == 0 {
 			continue
 		}
-		pos := buildFXPosition(positionID, positionDeals, groupedOrders[positionID], symbols, session)
-		positions = append(positions, pos)
+		closed := !openIDs[positionID] && (len(opening) == 0 || closedVolume(closing) >= filledTotal(opening))
+		positions = append(positions, buildFXPosition(positionID, opening, closing, groupedOrders[positionID], symbols, session, closed))
 	}
-	sort.Slice(positions, func(i, j int) bool { return positions[i].CreatedAt.Before(positions[j].CreatedAt) })
+	fx.SortPositions(positions)
 	return positions
 }
 
 func buildFXPosition(
 	positionID int64,
-	deals []*pb.ProtoOADeal,
+	opening, closing []*pb.ProtoOADeal,
 	orders []*pb.ProtoOAOrder,
-	symbols map[int64]string,
+	symbols helpers.Symbols,
 	session *connector.Session,
+	closed bool,
 ) domain.FXPosition {
 	id := strconv.FormatInt(positionID, 10)
-	opening := openingDeals(deals)
-	closing := closingDeals(deals)
-	first := deals[0]
-	firstOpen := first
+	if !closed {
+		id += ":partial"
+	}
+	first := closing[0]
 	if len(opening) > 0 {
-		firstOpen = opening[0]
+		first = opening[0]
 	}
 	lastClose := closing[len(closing)-1]
 	closedAt := helpers.TimeFromMillis(lastClose.GetExecutionTimestamp())
+	symbolID := first.GetSymbolId()
+	side := TradeSide(first.GetTradeSide())
 
-	pnl, swap, commission, pnlConversionFee := 0.0, 0.0, 0.0, 0.0
-	balanceAfterClose := 0.0
+	var pnl, swap, commission, conversionFee, balanceAfterClose float64
 	for _, deal := range closing {
 		detail := deal.GetClosePositionDetail()
 		digits := helpers.MoneyDigits(session, deal)
 		pnl += helpers.Money(detail.GetGrossProfit(), digits)
 		swap += helpers.Money(detail.GetSwap(), digits)
-		commissionValue := detail.GetCommission()
-		if commissionValue == 0 {
-			commissionValue = deal.GetCommission()
-		}
-		commission += helpers.Abs(helpers.Money(commissionValue, digits))
-		pnlConversionFee += helpers.Abs(helpers.Money(detail.GetPnlConversionFee(), digits))
+		commission += dealCommission(deal, session)
+		conversionFee += math.Abs(helpers.Money(detail.GetPnlConversionFee(), digits))
 		balanceAfterClose = helpers.Money(detail.GetBalance(), digits)
 	}
+	net := pnl + swap - commission - conversionFee
 
-	net := pnl + swap - commission - pnlConversionFee
-	status := "lose"
-	if net > 0 {
-		status = "win"
-	}
-	amount := closedAmount(closing)
-	entryPrice := closeEntryPrice(closing)
+	entryPrice := closing[0].GetClosePositionDetail().GetEntryPrice()
 	if entryPrice == 0 {
 		entryPrice = weightedPrice(opening)
 	}
-	positionOrders := BuildOrders(orders, deals, id, session)
-	if len(positionOrders) == 0 {
-		positionOrders = BuildOrdersFromDeals(deals, id, session)
-	}
-	tp, sl := extractProtection(orders, entryPrice, TradeSide(firstOpen.GetTradeSide()))
-	return domain.FXPosition{
+	tp, sl := extractProtection(orders, entryPrice, side)
+	pos := domain.FXPosition{
 		ID:          id,
-		Side:        TradeSide(firstOpen.GetTradeSide()),
-		Pair:        helpers.SymbolName(symbols, first.GetSymbolId()),
-		Symbol:      symbols[first.GetSymbolId()],
-		Amount:      amount,
+		Side:        side,
+		Pair:        symbols.Pair(symbolID),
+		Symbol:      symbols.Name(symbolID),
+		Amount:      symbols.Lots(symbolID, closedVolume(closing)),
 		EntryPrice:  entryPrice,
 		ExitPrice:   weightedPrice(closing),
-		Pnl:         helpers.Round8(pnl),
-		NetPnl:      helpers.Round8(net),
-		Commission:  helpers.Round8(commission),
-		Swap:        helpers.Round8(swap),
+		Pnl:         fx.Round8(pnl),
+		NetPnl:      fx.Round8(net),
+		Commission:  fx.Round8(commission),
+		Swap:        fx.Round8(swap),
 		TP:          tp,
 		SL:          sl,
 		Multiplier:  leverageMultiplier(session),
-		Closed:      true,
-		Status:      &status,
-		CreatedAt:   helpers.TimeFromMillis(firstOpen.GetExecutionTimestamp()),
+		Closed:      closed,
+		CloseReason: closeReason(lastClose, orders),
+		Status:      fx.Status(net),
+		CreatedAt:   helpers.TimeFromMillis(first.GetExecutionTimestamp()),
 		ClosedAt:    &closedAt,
-		Orders:      positionOrders,
-		BalanceInit: helpers.Round8(balanceAfterClose - net),
+		BalanceInit: fx.Round8(balanceAfterClose - net),
 	}
+	fx.ApplyRR(&pos)
+	pos.Orders = BuildOrders(orders, append(append([]*pb.ProtoOADeal{}, opening...), closing...), id, tp, sl, symbols, session)
+	return pos
+}
+
+func closeReason(deal *pb.ProtoOADeal, orders []*pb.ProtoOAOrder) string {
+	for _, order := range orders {
+		if order.GetOrderId() != deal.GetOrderId() {
+			continue
+		}
+		switch {
+		case order.GetIsStopOut():
+			return "STOP_OUT"
+		case order.GetOrderType() != pb.ProtoOAOrderType_STOP_LOSS_TAKE_PROFIT:
+			return "USER"
+		case order.StopLoss != nil:
+			return "SL"
+		case order.TakeProfit != nil:
+			return "TP"
+		}
+	}
+	return "USER"
 }
 
 func extractProtection(orders []*pb.ProtoOAOrder, entryPrice float64, side string) (tp, sl *float64) {
 	for _, order := range orders {
-		if order == nil {
-			continue
-		}
 		if order.TakeProfit != nil {
-			v := order.GetTakeProfit()
-			tp = &v
+			tp = fx.PriceOrNil(order.GetTakeProfit())
 		}
 		if order.StopLoss != nil {
-			v := order.GetStopLoss()
-			sl = &v
+			sl = fx.PriceOrNil(order.GetStopLoss())
 		}
 		if tp == nil && order.RelativeTakeProfit != nil && entryPrice > 0 {
-			v := relativeProtectionPrice(entryPrice, order.GetRelativeTakeProfit(), side, true)
-			tp = &v
+			tp = fx.PriceOrNil(relativeProtectionPrice(entryPrice, order.GetRelativeTakeProfit(), side, true))
 		}
 		if sl == nil && order.RelativeStopLoss != nil && entryPrice > 0 {
-			v := relativeProtectionPrice(entryPrice, order.GetRelativeStopLoss(), side, false)
-			sl = &v
+			sl = fx.PriceOrNil(relativeProtectionPrice(entryPrice, order.GetRelativeStopLoss(), side, false))
 		}
 	}
 	return tp, sl
@@ -144,96 +148,60 @@ func extractProtection(orders []*pb.ProtoOAOrder, entryPrice float64, side strin
 
 func relativeProtectionPrice(entryPrice float64, rawDistance int64, side string, takeProfit bool) float64 {
 	distance := float64(rawDistance) / 100000.0
-	if side == "LONG" {
-		if takeProfit {
-			return helpers.Round8(entryPrice + distance)
-		}
-		return helpers.Round8(entryPrice - distance)
+	if (side == fx.Long) == takeProfit {
+		return fx.Round8(entryPrice + distance)
 	}
-	if takeProfit {
-		return helpers.Round8(entryPrice - distance)
-	}
-	return helpers.Round8(entryPrice + distance)
+	return fx.Round8(entryPrice - distance)
 }
 
 func leverageMultiplier(session *connector.Session) uint32 {
-	if session == nil || session.LeverageInCents == 0 {
+	if session == nil || session.LeverageInCents < 100 {
 		return 1
 	}
-	multiplier := session.LeverageInCents / 100
-	if multiplier == 0 {
-		return 1
-	}
-	return multiplier
+	return session.LeverageInCents / 100
 }
 
-func hasCloseDeal(deals []*pb.ProtoOADeal) bool {
+func splitDeals(deals []*pb.ProtoOADeal) (opening, closing []*pb.ProtoOADeal) {
 	for _, deal := range deals {
 		if deal.GetClosePositionDetail() != nil {
-			return true
+			closing = append(closing, deal)
+		} else {
+			opening = append(opening, deal)
 		}
 	}
-	return false
-}
-
-func openingDeals(deals []*pb.ProtoOADeal) []*pb.ProtoOADeal {
-	out := make([]*pb.ProtoOADeal, 0, len(deals))
-	for _, deal := range deals {
-		if deal.GetClosePositionDetail() == nil {
-			out = append(out, deal)
-		}
-	}
-	return out
-}
-
-func closingDeals(deals []*pb.ProtoOADeal) []*pb.ProtoOADeal {
-	out := make([]*pb.ProtoOADeal, 0, len(deals))
-	for _, deal := range deals {
-		if deal.GetClosePositionDetail() != nil {
-			out = append(out, deal)
-		}
-	}
-	return out
+	return opening, closing
 }
 
 func sortDeals(deals []*pb.ProtoOADeal) {
-	sort.Slice(deals, func(i, j int) bool { return deals[i].GetExecutionTimestamp() < deals[j].GetExecutionTimestamp() })
+	sort.SliceStable(deals, func(i, j int) bool { return deals[i].GetExecutionTimestamp() < deals[j].GetExecutionTimestamp() })
 }
 
-func closedAmount(deals []*pb.ProtoOADeal) float64 {
+func closedVolume(closing []*pb.ProtoOADeal) int64 {
+	var volume int64
+	for _, deal := range closing {
+		volume += filledVolume(deal)
+	}
+	return volume
+}
+
+func filledTotal(deals []*pb.ProtoOADeal) int64 {
 	var volume int64
 	for _, deal := range deals {
-		if detail := deal.GetClosePositionDetail(); detail != nil && detail.GetClosedVolume() != 0 {
-			volume += detail.GetClosedVolume()
-			continue
-		}
-		volume += deal.GetFilledVolume()
+		volume += filledVolume(deal)
 	}
-	return volumeToAmount(volume)
-}
-
-func closeEntryPrice(closing []*pb.ProtoOADeal) float64 {
-	for _, deal := range closing {
-		if detail := deal.GetClosePositionDetail(); detail != nil && detail.GetEntryPrice() != 0 {
-			return detail.GetEntryPrice()
-		}
-	}
-	return 0
+	return volume
 }
 
 func weightedPrice(deals []*pb.ProtoOADeal) float64 {
 	var volume int64
 	var weighted float64
 	for _, deal := range deals {
-		v := deal.GetFilledVolume()
-		if v == 0 {
-			v = deal.GetVolume()
-		}
+		v := filledVolume(deal)
 		volume += v
 		weighted += float64(v) * deal.GetExecutionPrice()
 	}
 	if volume == 0 {
 		return 0
 	}
-	return weighted / float64(volume)
+	return fx.Round8(weighted / float64(volume))
 }

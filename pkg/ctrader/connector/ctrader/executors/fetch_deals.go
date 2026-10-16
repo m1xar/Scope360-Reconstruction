@@ -48,10 +48,10 @@ func fetchDealsRange(ctx context.Context, c *connector.Client, accountID int64, 
 	if err != nil {
 		return nil, err
 	}
-	return dedupeDeals(append(left, right...)), nil
+	return DedupeDeals(append(left, right...)), nil
 }
 
-func dedupeDeals(deals []*pb.ProtoOADeal) []*pb.ProtoOADeal {
+func DedupeDeals(deals []*pb.ProtoOADeal) []*pb.ProtoOADeal {
 	seen := make(map[int64]struct{}, len(deals))
 	out := make([]*pb.ProtoOADeal, 0, len(deals))
 	for _, deal := range deals {
@@ -76,10 +76,6 @@ func sortDealsByExecutionTime(deals []*pb.ProtoOADeal) {
 		}
 		return deals[i].GetExecutionTimestamp() < deals[j].GetExecutionTimestamp()
 	})
-}
-
-func DedupeDeals(deals []*pb.ProtoOADeal) []*pb.ProtoOADeal {
-	return dedupeDeals(deals)
 }
 
 func FetchDealsByPositionID(
@@ -138,5 +134,5 @@ func fetchDealsByPositionRange(
 	if err != nil {
 		return nil, err
 	}
-	return dedupeDeals(append(left, right...)), nil
+	return DedupeDeals(append(left, right...)), nil
 }

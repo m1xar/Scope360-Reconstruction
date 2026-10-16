@@ -23,14 +23,3 @@ func MoneyDigits(session *connector.Session, deal *pb.ProtoOADeal) uint32 {
 	}
 	return 0
 }
-
-func Abs(v float64) float64 {
-	if v < 0 {
-		return -v
-	}
-	return v
-}
-
-func Round8(v float64) float64 {
-	return math.Round(v*1e8) / 1e8
-}

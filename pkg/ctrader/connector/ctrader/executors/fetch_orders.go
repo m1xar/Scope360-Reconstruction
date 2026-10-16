@@ -45,10 +45,10 @@ func fetchOrdersRange(ctx context.Context, c *connector.Client, accountID int64,
 	if err != nil {
 		return nil, err
 	}
-	return dedupeOrders(append(left, right...)), nil
+	return DedupeOrders(append(left, right...)), nil
 }
 
-func dedupeOrders(orders []*pb.ProtoOAOrder) []*pb.ProtoOAOrder {
+func DedupeOrders(orders []*pb.ProtoOAOrder) []*pb.ProtoOAOrder {
 	seen := make(map[int64]struct{}, len(orders))
 	out := make([]*pb.ProtoOAOrder, 0, len(orders))
 	for _, order := range orders {
@@ -75,10 +75,6 @@ func sortOrdersByUpdateTime(orders []*pb.ProtoOAOrder) {
 		}
 		return iTime < jTime
 	})
-}
-
-func DedupeOrders(orders []*pb.ProtoOAOrder) []*pb.ProtoOAOrder {
-	return dedupeOrders(orders)
 }
 
 func FetchOrdersByPositionID(
@@ -137,5 +133,5 @@ func fetchOrdersByPositionRange(
 	if err != nil {
 		return nil, err
 	}
-	return dedupeOrders(append(left, right...)), nil
+	return DedupeOrders(append(left, right...)), nil
 }

@@ -1,6 +1,7 @@
 package builders
 
 import (
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/fx"
 	"math"
 	"sort"
 
@@ -28,7 +29,7 @@ func BuildTransactions(cashFlow []*pb.ProtoOADepositWithdraw) []domain.Transacti
 			continue
 		}
 
-		amount := helpers.Round8(math.Abs(helpers.Money(item.GetDelta(), item.GetMoneyDigits())))
+		amount := fx.Round8(math.Abs(helpers.Money(item.GetDelta(), item.GetMoneyDigits())))
 		if amount == 0 {
 			continue
 		}

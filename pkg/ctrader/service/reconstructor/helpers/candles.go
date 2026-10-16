@@ -1,15 +1,16 @@
 package helpers
 
 import (
+	"context"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
+	connector "github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader"
+	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader/executors"
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader/models"
 	pb "github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader/proto"
-	"github.com/m1xar/scope360-reconstruction/pkg/domain"
-	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/excursion"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/fx"
 )
 
 const priceScale = 100000.0
@@ -56,17 +57,14 @@ func CandlesFromTrendbars(pair string, interval string, bars []*pb.ProtoOATrendb
 			continue
 		}
 		lowRaw := float64(bar.GetLow())
-		openRaw := lowRaw + float64(bar.GetDeltaOpen())
-		closeRaw := lowRaw + float64(bar.GetDeltaClose())
-		highRaw := lowRaw + float64(bar.GetDeltaHigh())
 		out = append(out, models.Candle{
 			Pair:     pair,
 			Interval: interval,
 			OpenTime: time.Unix(int64(bar.GetUtcTimestampInMinutes())*60, 0).UTC(),
-			Open:     Round8(openRaw / priceScale),
-			High:     Round8(highRaw / priceScale),
-			Low:      Round8(lowRaw / priceScale),
-			Close:    Round8(closeRaw / priceScale),
+			Open:     fx.Round8((lowRaw + float64(bar.GetDeltaOpen())) / priceScale),
+			High:     fx.Round8((lowRaw + float64(bar.GetDeltaHigh())) / priceScale),
+			Low:      fx.Round8(lowRaw / priceScale),
+			Close:    fx.Round8((lowRaw + float64(bar.GetDeltaClose())) / priceScale),
 			Volume:   float64(bar.GetVolume()),
 		})
 	}
@@ -74,53 +72,27 @@ func CandlesFromTrendbars(pair string, interval string, bars []*pb.ProtoOATrendb
 }
 
 func SpotPrice(raw uint64) float64 {
-	return Round8(float64(raw) / priceScale)
+	return fx.Round8(float64(raw) / priceScale)
 }
 
-func CandleHighLow(candles []models.Candle) (high, low *float64) {
-	if len(candles) == 0 {
-		return nil, nil
-	}
-	h := candles[0].High
-	l := candles[0].Low
-	for _, candle := range candles[1:] {
-		if candle.High > h {
-			h = candle.High
+func BarFetcher(ctx context.Context, c *connector.Client, symbols Symbols) fx.BarFetcher {
+	return func(symbol, interval string, from, to time.Time) ([]fx.Bar, error) {
+		symbolID, ok := symbols.IDByName(symbol)
+		if !ok {
+			return nil, fmt.Errorf("ctrader symbol %q not found", symbol)
 		}
-		if candle.Low < l {
-			l = candle.Low
+		period, err := TrendbarPeriod(interval)
+		if err != nil {
+			return nil, err
 		}
+		bars, err := executors.FetchTrendbars(ctx, c, symbolID, period, from, to, 0)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]fx.Bar, 0, len(bars))
+		for _, candle := range CandlesFromTrendbars(symbol, interval, bars) {
+			out = append(out, fx.Bar{OpenTime: candle.OpenTime, High: candle.High, Low: candle.Low})
+		}
+		return out, nil
 	}
-	return &h, &l
-}
-
-// ApplyFXMAEMFE sets MAE/MFE from the high/low of the bars inside the position;
-// high/low are nil when no bar lies fully inside it.
-func ApplyFXMAEMFE(pos *domain.FXPosition, high, low *float64) {
-	if pos == nil {
-		return
-	}
-	amount := pos.Amount
-	priceDelta := pos.ExitPrice - pos.EntryPrice
-	if pos.Side == "SHORT" {
-		priceDelta = pos.EntryPrice - pos.ExitPrice
-	}
-	if priceDelta != 0 && pos.Pnl != 0 {
-		amount = math.Abs(pos.Pnl / priceDelta)
-	}
-	pos.MAE, pos.MFE = excursion.Compute(pos.Side, pos.EntryPrice, amount, high, low, pos.Pnl, pos.NetPnl)
-}
-
-func minFloat(a, b float64) float64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxFloat(a, b float64) float64 {
-	if a > b {
-		return a
-	}
-	return b
 }

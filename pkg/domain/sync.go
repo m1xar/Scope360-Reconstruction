@@ -15,4 +15,5 @@ type SyncFX struct {
 	BalanceSnapshots []UserBalanceSnapshot
 	AccountInfo      FXAccountInfo
 	Transactions     []Transaction
+	PendingOrders    []FXOrder
 }

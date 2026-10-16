@@ -7,36 +7,20 @@ import (
 
 	connector "github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader"
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader/executors"
-	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader/models"
 	pb "github.com/m1xar/scope360-reconstruction/pkg/ctrader/connector/ctrader/proto"
-	"github.com/m1xar/scope360-reconstruction/pkg/domain"
-	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/candlespan"
-	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/excursion"
 )
 
-func LoadHistory(ctx context.Context, c *connector.Client, days int) ([]*pb.ProtoOADeal, []*pb.ProtoOAOrder, map[int64]string, *connector.Session, error) {
-	session, err := c.EnsureSession(ctx)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
+func LoadHistory(ctx context.Context, c *connector.Client, days int) ([]*pb.ProtoOADeal, []*pb.ProtoOAOrder, error) {
 	from, to := HistoryRange(days)
 	deals, err := executors.FetchDeals(ctx, c, from, to)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, err
 	}
 	orders, err := executors.FetchOrders(ctx, c, from, to)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, err
 	}
-	deals, orders, err = backfillTruncatedPositions(ctx, c, deals, orders, to)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	symbols, err := executors.FetchSymbolNames(ctx, c)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	return deals, orders, symbols, session, nil
+	return backfillTruncatedPositions(ctx, c, deals, orders, to)
 }
 
 func backfillTruncatedPositions(
@@ -46,7 +30,7 @@ func backfillTruncatedPositions(
 	orders []*pb.ProtoOAOrder,
 	to time.Time,
 ) ([]*pb.ProtoOADeal, []*pb.ProtoOAOrder, error) {
-	truncated := PositionsMissingOpeningDeal(deals)
+	truncated := positionsMissingOpeningDeal(deals)
 	if len(truncated) == 0 {
 		return deals, orders, nil
 	}
@@ -70,7 +54,7 @@ func backfillTruncatedPositions(
 	return executors.DedupeDeals(deals), executors.DedupeOrders(orders), nil
 }
 
-func PositionsMissingOpeningDeal(deals []*pb.ProtoOADeal) []int64 {
+func positionsMissingOpeningDeal(deals []*pb.ProtoOADeal) []int64 {
 	type coverage struct {
 		opened bool
 		closed bool
@@ -111,90 +95,26 @@ func PositionsMissingOpeningDeal(deals []*pb.ProtoOADeal) []int64 {
 	return out
 }
 
-func EnrichFXMAEMFE(ctx context.Context, c *connector.Client, positions []domain.FXPosition, symbols map[int64]string) {
-	if len(positions) == 0 {
-		return
-	}
-	idByPair := make(map[string]int64, len(symbols))
-	for id, name := range symbols {
-		idByPair[name] = id
-	}
-	for i := range positions {
-		pos := &positions[i]
-		if pos.ClosedAt == nil {
-			continue
-		}
-		symbolID, ok := idByPair[pos.Pair]
-		if !ok {
-			continue
-		}
-		candles, err := trendbarsForSpan(ctx, c, symbolID, pos.Pair, pos.CreatedAt, *pos.ClosedAt)
-		if err != nil {
-			continue
-		}
-		inside := candles[:0]
-		for _, candle := range candles {
-			if excursion.Inside(candle.OpenTime.UnixMilli(), excursion.IntervalMs(candle.Interval), pos.CreatedAt.UnixMilli(), pos.ClosedAt.UnixMilli()) {
-				inside = append(inside, candle)
-			}
-		}
-		high, low := CandleHighLow(inside)
-		ApplyFXMAEMFE(pos, high, low)
-	}
+type Quote struct {
+	Bid float64
+	Ask float64
 }
 
-func trendbarsForSpan(
-	ctx context.Context,
-	c *connector.Client,
-	symbolID int64,
-	pair string,
-	from, to time.Time,
-) ([]models.Candle, error) {
-	var out []models.Candle
-
-	for _, segment := range candlespan.Split(from.UnixMilli(), to.UnixMilli()) {
-		period, err := TrendbarPeriod(segment.Interval)
-		if err != nil {
-			return nil, err
-		}
-
-		bars, err := executors.FetchTrendbars(
-			ctx, c, symbolID, period,
-			time.UnixMilli(segment.StartMs), time.UnixMilli(segment.EndMs), 0,
-		)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, CandlesFromTrendbars(pair, segment.Interval, bars)...)
-	}
-
-	return out, nil
-}
-
-func FetchCurrentPrices(ctx context.Context, c *connector.Client, reconcile *pb.ProtoOAReconcileRes) map[int64]float64 {
+func FetchCurrentPrices(ctx context.Context, c *connector.Client, reconcile *pb.ProtoOAReconcileRes) map[int64]Quote {
+	prices := make(map[int64]Quote)
 	if reconcile == nil {
-		return map[int64]float64{}
+		return prices
 	}
-	symbolIDs := make(map[int64]struct{})
 	for _, pos := range reconcile.GetPosition() {
-		if pos == nil || pos.GetTradeData() == nil {
+		symbolID := pos.GetTradeData().GetSymbolId()
+		if _, done := prices[symbolID]; done {
 			continue
 		}
-		symbolIDs[pos.GetTradeData().GetSymbolId()] = struct{}{}
-	}
-	prices := make(map[int64]float64, len(symbolIDs))
-	for symbolID := range symbolIDs {
-		spot, err := executors.FetchSpot(ctx, c, symbolID)
+		spot, err := c.FetchSpot(ctx, symbolID)
 		if err != nil || spot == nil {
 			continue
 		}
-		price := SpotPrice(spot.GetBid())
-		if price == 0 {
-			price = SpotPrice(spot.GetAsk())
-		}
-		if price != 0 {
-			prices[symbolID] = price
-		}
+		prices[symbolID] = Quote{Bid: SpotPrice(spot.GetBid()), Ask: SpotPrice(spot.GetAsk())}
 	}
 	return prices
 }

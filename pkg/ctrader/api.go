@@ -12,6 +12,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/service/reconstructor"
 	"github.com/m1xar/scope360-reconstruction/pkg/ctrader/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/fx"
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/parallel"
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/scope"
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
@@ -50,6 +51,7 @@ func Sync(
 	err = parallel.Run(
 		func() error { out.Positions = d.ClosedPositions(); return nil },
 		func() error { out.OpenPositions = d.OpenPositions(); return nil },
+		func() error { out.PendingOrders = d.PendingOrders(); return nil },
 		func() error { out.BalanceSnapshots = d.BalanceSnapshots(); return nil },
 		func() error {
 			info, err := d.AccountInfo()
@@ -125,34 +127,26 @@ func GetBalanceSnapshots(
 	return d.BalanceSnapshots(), nil
 }
 
+func GetPendingOrders(
+	client *connector.Client,
+	cfg connector.Config,
+) ([]domain.FXOrder, error) {
+	d, err := load(client, cfg, 0, scope.Open)
+	if err != nil {
+		return nil, err
+	}
+	return d.PendingOrders(), nil
+}
+
 func GetAccountInfo(
 	client *connector.Client,
 	cfg connector.Config,
 ) (*domain.FXAccountInfo, error) {
-	ctx := context.Background()
-	c := newClient(client, cfg)
-	trader, err := executors.FetchTrader(ctx, c)
+	d, err := load(client, cfg, 0, 0)
 	if err != nil {
 		return nil, err
 	}
-	if trader == nil {
-		return nil, nil
-	}
-
-	assets, err := executors.FetchAssets(ctx, c)
-	if err != nil {
-		return nil, err
-	}
-	currency, ok := helpers.AssetNameByID(assets, trader.GetDepositAssetId())
-	if !ok {
-		return nil, fmt.Errorf("ctrader deposit asset %d not found", trader.GetDepositAssetId())
-	}
-
-	return &domain.FXAccountInfo{
-		Balance:  helpers.Money(trader.GetBalance(), trader.GetMoneyDigits()),
-		Leverage: uint64(trader.GetLeverageInCents() / 100),
-		Currency: currency,
-	}, nil
+	return d.AccountInfo()
 }
 
 func GetTransactions(
@@ -204,7 +198,7 @@ func GetCandles(
 }
 
 func NormalizeSymbol(symbolName string) string {
-	return helpers.NormalizePair(symbolName)
+	return fx.NormalizePair(symbolName)
 }
 
 func DenormalizeSymbol(client *connector.Client, cfg connector.Config, pair string) (string, error) {

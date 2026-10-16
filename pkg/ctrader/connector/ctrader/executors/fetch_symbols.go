@@ -32,3 +32,20 @@ func FetchSymbolNames(ctx context.Context, c *connector.Client) (map[int64]strin
 	}
 	return out, nil
 }
+
+func FetchSymbols(ctx context.Context, c *connector.Client, ids []int64) ([]*pb.ProtoOASymbol, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	session, err := c.EnsureSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	accountID := session.CtidTraderAccountID
+	req := &pb.ProtoOASymbolByIdReq{CtidTraderAccountId: &accountID, SymbolId: ids}
+	var res pb.ProtoOASymbolByIdRes
+	if err := c.Do(ctx, pb.ProtoOAPayloadType_PROTO_OA_SYMBOL_BY_ID_REQ, req, &res); err != nil {
+		return nil, err
+	}
+	return res.GetSymbol(), nil
+}

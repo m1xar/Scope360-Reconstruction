@@ -5,6 +5,8 @@ import "time"
 type FXOrder struct {
 	ID            string
 	PositionID    string
+	Pair          string
+	Symbol        string
 	Type          string
 	Status        string
 	Side          string
@@ -13,6 +15,8 @@ type FXOrder struct {
 	AveragePrice  float64
 	StopPrice     float64
 	OriginalPrice float64
+	TP            *float64
+	SL            *float64
 	UpdatedAt     time.Time
 	Trade         FXTrade
 }

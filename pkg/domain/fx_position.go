@@ -26,6 +26,7 @@ type FXPosition struct {
 	Multiplier       uint32
 	Isolated         bool
 	Closed           bool
+	CloseReason      string
 	Status           *string
 	CreatedAt        time.Time
 	ClosedAt         *time.Time
