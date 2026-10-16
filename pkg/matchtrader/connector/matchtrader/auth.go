@@ -95,13 +95,10 @@ func (c *Client) refresh(ctx context.Context, stale *Session) (*Session, error) 
 }
 
 func (c *Client) login(ctx context.Context) (*Session, error) {
-	if c.base == "" {
-		return nil, errors.New("matchtrader: BaseURL is required")
+	if c.base == "" || c.cfg.Email == "" || c.cfg.Password == "" || strings.TrimSpace(c.cfg.AccountID) == "" {
+		return nil, errors.New("matchtrader: BaseURL, Email, Password and AccountID are required")
 	}
-	brokerID := strings.TrimSpace(c.cfg.BrokerID)
-	if brokerID == "" {
-		brokerID = c.platformPartnerID(ctx)
-	}
+	brokerID := c.platformPartnerID(ctx)
 
 	attempts := []struct {
 		path, userField string
@@ -161,16 +158,9 @@ func (c *Client) platformPartnerID(ctx context.Context) string {
 }
 
 func (c *Client) newSession(res models.LoginResponse, brokerID string) (*Session, error) {
-	accounts := res.AllAccounts()
-	account, ok := pickAccount(accounts, res.SelectedTradingAccount, c.cfg.AccountID)
+	account, ok := pickAccount(res.AllAccounts(), res.SelectedTradingAccount, strings.TrimSpace(c.cfg.AccountID))
 	if !ok {
-		if c.cfg.AccountID != "" {
-			return nil, fmt.Errorf("matchtrader: trading account %q not found", c.cfg.AccountID)
-		}
-		return nil, errors.New("matchtrader: login returned no trading accounts")
-	}
-	if account.Offer.System.UUID == "" {
-		return nil, errors.New("matchtrader: trading account has no system uuid")
+		return nil, fmt.Errorf("matchtrader: trading account %q not found", c.cfg.AccountID)
 	}
 	return &Session{
 		Token: res.Token,
@@ -182,30 +172,13 @@ func (c *Client) newSession(res models.LoginResponse, brokerID string) (*Session
 }
 
 func pickAccount(accounts []models.TradingAccount, selected *models.TradingAccount, id string) (models.TradingAccount, bool) {
-	id = strings.TrimSpace(id)
-	if id != "" {
-		for _, a := range accounts {
-			if a.TradingAccountID.String() == id || a.UUID == id {
-				return a, true
-			}
-		}
-		if selected != nil && (selected.TradingAccountID.String() == id || selected.UUID == id) {
-			return *selected, true
-		}
-		return models.TradingAccount{}, false
-	}
 	if selected != nil {
-		for _, a := range accounts {
-			if a.TradingAccountID != "" && a.TradingAccountID == selected.TradingAccountID && a.Offer.System.UUID != "" {
-				return a, true
-			}
-		}
-		if selected.Offer.System.UUID != "" {
-			return *selected, true
-		}
+		accounts = append(accounts, *selected)
 	}
-	if len(accounts) > 0 {
-		return accounts[0], true
+	for _, a := range accounts {
+		if (a.TradingAccountID.String() == id || a.UUID == id) && a.Offer.System.UUID != "" {
+			return a, true
+		}
 	}
 	return models.TradingAccount{}, false
 }

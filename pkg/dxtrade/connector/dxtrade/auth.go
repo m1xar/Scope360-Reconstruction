@@ -30,8 +30,8 @@ func (c *Client) Login(ctx context.Context) error {
 }
 
 func (c *Client) loginLocked(ctx context.Context) error {
-	if c.cfg.Username == "" || c.cfg.Password == "" {
-		return errors.New("dxtrade: username and password are required")
+	if c.host == "" || c.cfg.Username == "" || c.cfg.Password == "" || strings.TrimSpace(c.cfg.Account) == "" {
+		return errors.New("dxtrade: BaseURL, Username, Password and Account are required")
 	}
 	c.mu.Lock()
 	known := c.domain

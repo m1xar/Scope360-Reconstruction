@@ -9,7 +9,6 @@ type Config struct {
 	BaseURL    string
 	Email      string
 	Password   string
-	BrokerID   string
 	AccountID  string
 	HTTPClient *http.Client
 	Recorder   Recorder

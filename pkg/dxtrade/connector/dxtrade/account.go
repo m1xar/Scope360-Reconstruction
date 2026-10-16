@@ -46,7 +46,7 @@ func (c *Client) Account(ctx context.Context) (*models.AccountDetails, error) {
 	want := strings.TrimSpace(c.cfg.Account)
 	for i := range accounts {
 		code := accounts[i].Account
-		if want == "" || code == want || strings.HasSuffix(code, ":"+want) {
+		if code == want || strings.HasSuffix(code, ":"+want) {
 			c.account = &accounts[i]
 			return c.account, nil
 		}
