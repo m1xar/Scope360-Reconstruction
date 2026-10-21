@@ -2,12 +2,12 @@ package helpers
 
 import (
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/connector/mexc/models"
-	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/excursion"
 )
 
 func Round8(val float64) float64 {
@@ -116,20 +116,34 @@ func IsStableCurrency(currency string) bool {
 	}
 }
 
-// ApplyMAEMFE sets MAE/MFE from the high/low of the bars inside the position;
-// high/low are nil when no bar lies fully inside it.
-func ApplyMAEMFE(pos *domain.Position, high, low *float64) {
-	entry := pos.EntryPrice
-	exit := pos.ExitPrice
-
-	amount := pos.Amount
-	priceDelta := exit - entry
-	if pos.Side == "SHORT" {
-		priceDelta = entry - exit
+func ContractVolumeToBase(volume, contractSize float64) float64 {
+	if contractSize <= 0 {
+		return volume
 	}
-	if priceDelta != 0 {
-		amount = math.Abs(pos.Pnl / priceDelta)
-	}
+	return volume * contractSize
+}
 
-	pos.MAE, pos.MFE = excursion.Compute(pos.Side, entry, amount, high, low, pos.Pnl, pos.NetPnl)
+func OrderSign(side int) float64 {
+	switch side {
+	case 3, 4:
+		return -1
+	default:
+		return 1
+	}
+}
+
+func PositionTypeOf(order models.Order) int {
+	if order.PositionType > 0 {
+		return order.PositionType
+	}
+	switch order.Side {
+	case 2, 3:
+		return 2
+	default:
+		return 1
+	}
+}
+
+func PositionKey(symbol string, positionType int) string {
+	return symbol + "|" + strconv.Itoa(positionType)
 }

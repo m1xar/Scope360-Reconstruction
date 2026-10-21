@@ -4,6 +4,7 @@ type Order struct {
 	OrderId         string  `json:"orderId"`
 	Symbol          string  `json:"symbol"`
 	PositionId      int64   `json:"positionId"`
+	PositionType    int     `json:"positionType"`
 	Price           float64 `json:"price"`
 	Vol             float64 `json:"vol"`
 	Leverage        int     `json:"leverage"`

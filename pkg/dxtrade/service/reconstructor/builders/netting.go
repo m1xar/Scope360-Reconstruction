@@ -43,16 +43,16 @@ func (s *segment) add(f helpers.Fill, closing bool, cash helpers.CashSums) {
 	}
 }
 
-func (s *segment) position(orders map[string]models.Order, instruments map[string]models.InstrumentDetails, lotSizes map[string]float64) domain.FXPosition {
+func (s *segment) position(orders map[string]models.Order, instruments map[string]models.InstrumentDetails, lotSizes map[string]float64, ledger []helpers.CashEntry) domain.FXPosition {
 	id := s.opens[0].OrderID
 	list := make([]models.Order, 0, len(s.orderIDs))
 	for _, oid := range s.orderIDs {
 		list = append(list, orders[oid])
 	}
-	return buildPosition(id, s.side, s.opens, s.closes, s.cash, BuildOrders(list, id, lotSizes), nil, nil, instruments, lotSizes, true, closeReason(list, s.closes[len(s.closes)-1]))
+	return buildPosition(id, s.side, s.opens, s.closes, s.cash, BuildOrders(list, id, lotSizes, ledger), nil, nil, instruments, lotSizes, closeReason(list, s.closes[len(s.closes)-1]))
 }
 
-func buildNetting(orders []models.Order, open []models.Position, instruments map[string]models.InstrumentDetails, lotSizes map[string]float64) []domain.FXPosition {
+func buildNetting(orders []models.Order, open []models.Position, instruments map[string]models.InstrumentDetails, lotSizes map[string]float64, ledger []helpers.CashEntry) []domain.FXPosition {
 	current := make(map[string]float64)
 	for _, p := range open {
 		q := math.Abs(p.Quantity.Float())
@@ -119,7 +119,7 @@ func buildNetting(orders []models.Order, open []models.Position, instruments map
 			if math.Abs(net) < helpers.Epsilon*max(1, f.Quantity) {
 				net = 0
 				if seg.complete {
-					out = append(out, seg.position(byID, instruments, lotSizes))
+					out = append(out, seg.position(byID, instruments, lotSizes, ledger))
 				}
 				seg = nil
 			}

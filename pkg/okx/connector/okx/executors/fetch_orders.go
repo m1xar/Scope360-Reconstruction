@@ -14,7 +14,7 @@ const ordersArchivePath = "/api/v5/trade/orders-history-archive"
 
 const ordersPageLimit = 100
 
-const windowSize = 30 * 24 * time.Hour
+const WindowSize = 30 * 24 * time.Hour
 
 func FetchAllOrders(client *resty.Client, baseURL, instType string, startMs int64) ([]models.Order, error) {
 	var result []models.Order
@@ -22,7 +22,7 @@ func FetchAllOrders(client *resty.Client, baseURL, instType string, startMs int6
 
 	windowEnd := now
 	for windowEnd > startMs {
-		windowBegin := windowEnd - windowSize.Milliseconds()
+		windowBegin := windowEnd - WindowSize.Milliseconds()
 		if windowBegin < startMs {
 			windowBegin = startMs
 		}

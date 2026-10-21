@@ -58,6 +58,18 @@ func ByPosition(ledger []CashEntry) map[string][]CashEntry {
 	return out
 }
 
+func ByOrder(ledger []CashEntry) map[string]CashSums {
+	out := make(map[string]CashSums)
+	for _, e := range ledger {
+		if e.OrderID != "" {
+			sums := out[e.OrderID]
+			sums.Add(e.CashTransaction, 1)
+			out[e.OrderID] = sums
+		}
+	}
+	return out
+}
+
 func BalanceEvents(ledger []CashEntry) []fx.BalanceEvent {
 	events := make([]fx.BalanceEvent, 0, len(ledger))
 	for _, e := range ledger {

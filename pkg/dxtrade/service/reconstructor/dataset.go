@@ -95,7 +95,7 @@ func Load(ctx context.Context, client *connector.Client, days int, s scope.Scope
 			d.history = helpers.MergeOrders(orders, openers)
 			return nil
 		}),
-		when(s.Any(scope.Closed|scope.Balances|scope.Transactions), func() (err error) {
+		when(s.Any(scope.Closed|scope.Open|scope.Balances|scope.Transactions), func() (err error) {
 			d.transfers, err = executors.FetchTransfers(ctx, client, from)
 			return
 		}),

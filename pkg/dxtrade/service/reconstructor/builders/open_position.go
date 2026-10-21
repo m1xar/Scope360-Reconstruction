@@ -42,7 +42,7 @@ func BuildOpenPositions(
 				related = append(related, o)
 			}
 		}
-		built := BuildOrders(related, code, lotSizes)
+		built := BuildOrders(related, code, lotSizes, ledger)
 		for i := range built {
 			if built[i].Amount == 0 && built[i].Status == fx.StatusWorking {
 				built[i].Amount = amount

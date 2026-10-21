@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/google/uuid"
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/connector/mexc/executors"
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/connector/mexc/models"
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/service/reconstructor/builders"
+	"github.com/m1xar/scope360-reconstruction/pkg/mexc/service/reconstructor/envelope"
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/service/reconstructor/helpers"
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/service/reconstructor/workers"
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/parallel"
@@ -23,13 +23,12 @@ type Dataset struct {
 	cutoff *time.Time
 	scope  scope.Scope
 
-	closed        []models.HistoryPosition
 	contractSizes map[string]float64
 	open          []models.OpenPosition
 
-	orders   []models.Order
-	ordersOK bool
-	funding  []models.FundingRecord
+	groups    [][]models.Order
+	openFills map[string][]models.Order
+	funding   []models.FundingRecord
 
 	equity      float64
 	equityOK    bool
@@ -45,25 +44,21 @@ func Load(client *resty.Client, cutoff *time.Time, s scope.Scope) (*Dataset, err
 	if s.Has(scope.Balances) {
 		s |= scope.Closed
 	}
-	d := &Dataset{client: client, cutoff: cutoff, scope: s}
+	d := &Dataset{client: client, cutoff: cutoff, scope: s, contractSizes: map[string]float64{}}
 	cutoffMs := window.StartMs(cutoff)
 
 	var equityErr error
 	err := parallel.Run(
-		when(s.Has(scope.Closed), func() error {
-			closed, err := executors.FetchAllHistoryPositions(client, cutoffMs)
-			if err != nil {
-				return err
-			}
-			d.closed = positionsClosedAfter(closed, cutoff)
-			return nil
-		}),
-		when(s.Has(scope.Open), func() error {
+		when(s.Any(scope.Closed|scope.Open), func() error {
 			open, err := executors.FetchOpenPositions(client)
 			if err != nil {
 				return err
 			}
 			d.open = open
+			return nil
+		}),
+		when(s.Any(scope.Closed|scope.Open), func() error {
+			d.contractSizes = fetchContractSizes(client)
 			return nil
 		}),
 		when(s.Any(scope.Closed|scope.Balances), func() error {
@@ -89,59 +84,47 @@ func Load(client *resty.Client, cutoff *time.Time, s scope.Scope) (*Dataset, err
 		return nil, equityErr
 	}
 
-	ordersFrom, fundingFrom, transfersFrom := int64(0), int64(0), cutoffMs
-	if len(d.closed) > 0 {
-		oldest := d.closed[0].CreateTime
-		for _, cp := range d.closed[1:] {
-			if cp.CreateTime < oldest {
-				oldest = cp.CreateTime
-			}
+	if s.Any(scope.Closed | scope.Open) {
+		var walkCutoff *time.Time
+		if s.Has(scope.Closed) {
+			walkCutoff = cutoff
 		}
-		ordersFrom = oldest - 10*60*1000
-		fundingFrom = ordersFrom
-		if cutoff != nil && oldest < transfersFrom {
-			transfersFrom = oldest
+		untilResolved := s.Has(scope.Open) && !(s.Has(scope.Closed) && cutoff == nil)
+		walk, err := walkOrders(func(startMs, endMs int64) ([]models.Order, error) {
+			return executors.FetchHistoryOrdersWindow(client, startMs, endMs)
+		}, d.open, d.contractSizes, walkCutoff, untilResolved)
+		if err != nil {
+			return nil, err
 		}
-	}
-	if s.Has(scope.Fundings) && (cutoff == nil || cutoffMs < fundingFrom) {
-		fundingFrom = cutoffMs
-	}
-	if start := oldestOpenMs(d.open); start > 0 && (ordersFrom == 0 || start < ordersFrom) {
-		ordersFrom = start
+		fillMissingContractSizes(client, d.contractSizes, walkSymbols(walk, d.open))
+		d.openFills = walk.openFills
+		if s.Has(scope.Closed) {
+			d.groups = GroupsClosedAfter(walk.groups, cutoff)
+		}
 	}
 
-	var ordersErr error
-	err = parallel.Run(
-		when(len(d.closed) > 0, func() error {
-			d.contractSizes = fetchContractSizes(client, d.closed)
-			return nil
-		}),
-		when(ordersFrom > 0, func() error {
-			orders, err := executors.FetchAllHistoryOrders(client, ordersFrom)
-			if err != nil {
-				ordersErr = err
-				return nil
-			}
-			d.orders, d.ordersOK = orders, true
-			return nil
-		}),
-		when(s.Has(scope.Closed) && (len(d.closed) > 0 || s.Has(scope.Fundings)), func() error {
+	fundingFrom, transfersFrom := int64(0), cutoffMs
+	if earliest := (orderWalk{groups: d.groups}).earliestOpenMs(); earliest > 0 {
+		fundingFrom = earliest - fundingLookback.Milliseconds()
+		if cutoff != nil && earliest < transfersFrom {
+			transfersFrom = earliest
+		}
+	}
+	if s.Has(scope.Fundings) && (cutoff == nil || fundingFrom == 0 || cutoffMs < fundingFrom) {
+		fundingFrom = cutoffMs
+	}
+
+	return d, parallel.Run(
+		when(s.Has(scope.Closed) && (len(d.groups) > 0 || s.Has(scope.Fundings)), func() error {
 			return d.loadFunding(fundingFrom)
 		}),
-		when(s.Has(scope.Closed) && (len(d.closed) > 0 || s.Any(scope.Transactions|scope.Balances)), func() error {
+		when(s.Has(scope.Closed) && (len(d.groups) > 0 || s.Any(scope.Transactions|scope.Balances)), func() error {
 			if err := d.loadTransfers(transfersFrom); err != nil && s.Any(scope.Transactions|scope.Balances) {
 				return err
 			}
 			return nil
 		}),
 	)
-	if err != nil {
-		return nil, err
-	}
-	if !d.ordersOK && ordersErr != nil && len(d.closed) > 0 {
-		return nil, ordersErr
-	}
-	return d, nil
 }
 
 func when(cond bool, fn func() error) func() error {
@@ -169,86 +152,36 @@ func (d *Dataset) loadTransfers(sinceMs int64) error {
 	return nil
 }
 
-func oldestOpenMs(open []models.OpenPosition) int64 {
-	start := int64(0)
-	for _, r := range open {
-		if r.HoldVol <= 0 {
-			continue
-		}
-		if start == 0 || r.CreateTime < start {
-			start = r.CreateTime
-		}
-	}
-	return start
-}
-
 func (d *Dataset) ClosedPositions() ([]domain.Position, error) {
 	d.closedOnce.Do(func() { d.closedPos, d.closedErr = d.buildClosed() })
 	return d.closedPos, d.closedErr
 }
 
 func (d *Dataset) buildClosed() ([]domain.Position, error) {
-	if len(d.closed) == 0 {
+	if len(d.groups) == 0 {
 		return []domain.Position{}, nil
 	}
-	ordersBySymbol := helpers.GroupOrdersBySymbol(d.orders)
 
 	candleRequests := make(chan helpers.CandleRequest, defaultCandleWorkers)
 	workers.StartCandleWorkers(d.client, candleRequests, defaultCandleWorkers)
 
-	type pendingCandle struct {
-		idx     int
-		replyCh chan helpers.CandleResponse
+	envelopes := make(chan envelope.PositionEnvelope)
+	positionsCh := make(chan domain.Position)
+
+	go func() {
+		ReconstructPositions(d.groups, d.funding, d.contractSizes, candleRequests, envelopes)
+		close(envelopes)
+		close(candleRequests)
+	}()
+
+	workers.StartPositionBuilders(envelopes, positionsCh, defaultPositionWorkers)
+
+	positions := make([]domain.Position, 0)
+	for pos := range positionsCh {
+		positions = append(positions, pos)
 	}
-
-	pending := make([]pendingCandle, 0, len(d.closed))
-	positions := make([]domain.Position, len(d.closed))
-
-	for i, cp := range d.closed {
-		posOrders := helpers.MatchOrdersToPosition(cp, ordersBySymbol)
-		funding := builders.ExtractFundingForPosition(d.funding, cp.Symbol, cp.CreateTime, cp.UpdateTime)
-
-		pos, err := builders.BuildPosition(cp, posOrders, funding, d.contractSizes[cp.Symbol])
-		if err != nil {
-			continue
-		}
-		positions[i] = pos
-
-		replyCh := make(chan helpers.CandleResponse, 1)
-		candleRequests <- helpers.CandleRequest{
-			Symbol:  cp.Symbol,
-			Bar:     "1m",
-			StartMs: cp.CreateTime,
-			EndMs:   cp.UpdateTime,
-			ReplyCh: replyCh,
-		}
-		pending = append(pending, pendingCandle{idx: i, replyCh: replyCh})
-	}
-	close(candleRequests)
-
-	for _, p := range pending {
-		resp := <-p.replyCh
-		if resp.Err == nil {
-			high, low := helpers.GetHighLow(resp.Candles)
-			helpers.ApplyMAEMFE(&positions[p.idx], high, low)
-		}
-	}
-
-	filtered := make([]domain.Position, 0, len(positions))
-	for _, pos := range positions {
-		if pos.ID != uuid.Nil {
-			filtered = append(filtered, pos)
-		}
-	}
-	positions = filtered
 
 	sort.Slice(positions, func(i, j int) bool {
-		if positions[i].ClosedAt == nil {
-			return true
-		}
-		if positions[j].ClosedAt == nil {
-			return false
-		}
 		return positions[i].ClosedAt.Before(*positions[j].ClosedAt)
 	})
 
@@ -260,17 +193,10 @@ func (d *Dataset) buildClosed() ([]domain.Position, error) {
 }
 
 func (d *Dataset) OpenPositions() ([]domain.OpenPosition, error) {
-	positions := make([]domain.OpenPosition, 0, len(d.open))
-	for _, r := range d.open {
-		if r.HoldVol <= 0 {
-			continue
-		}
-		positions = append(positions, builders.BuildOpenPosition(r))
+	if len(d.open) == 0 {
+		return []domain.OpenPosition{}, nil
 	}
-	if d.ordersOK {
-		enrichOpenPositionOrders(d.orders, d.open, positions)
-	}
-	return positions, nil
+	return builders.BuildOpenPositions(d.open, d.openFills, d.contractSizes), nil
 }
 
 func (d *Dataset) BalanceSnapshots() ([]domain.UserBalanceSnapshot, error) {

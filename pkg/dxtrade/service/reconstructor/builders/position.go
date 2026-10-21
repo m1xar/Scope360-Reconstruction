@@ -21,7 +21,7 @@ func BuildFXPositions(
 	if hedging {
 		out = buildHedging(orders, ledger, open, instruments, lotSizes)
 	} else {
-		out = buildNetting(orders, open, instruments, lotSizes)
+		out = buildNetting(orders, open, instruments, lotSizes, ledger)
 	}
 	fx.SortPositions(out)
 	return out
@@ -54,6 +54,9 @@ func buildHedging(
 
 	var out []domain.FXPosition
 	for _, code := range codes {
+		if openCodes[code] {
+			continue
+		}
 		group := groups[code]
 		var opens, closes []helpers.Fill
 		side := ""
@@ -69,18 +72,13 @@ func buildHedging(
 			opens = append(opens, fills...)
 		}
 		openQty, closeQty := helpers.Quantity(opens), helpers.Quantity(closes)
-		if openQty <= helpers.Epsilon || closeQty <= helpers.Epsilon {
+		if openQty <= helpers.Epsilon || closeQty+helpers.Epsilon*max(1, openQty) < openQty {
 			continue
 		}
 		helpers.SortFills(opens)
 		helpers.SortFills(closes)
-		closed := !openCodes[code] && closeQty+helpers.Epsilon*max(1, openQty) >= openQty
 		tp, sl := Protection(group, closes[len(closes)-1].Time)
-		posID := code
-		if !closed {
-			posID = code + ":partial"
-		}
-		out = append(out, buildPosition(posID, side, opens, closes, helpers.SumEntries(cash[code]), BuildOrders(group, posID, lotSizes), tp, sl, instruments, lotSizes, closed, closeReason(group, closes[len(closes)-1])))
+		out = append(out, buildPosition(code, side, opens, closes, helpers.SumEntries(cash[code]), BuildOrders(group, code, lotSizes, ledger), tp, sl, instruments, lotSizes, closeReason(group, closes[len(closes)-1])))
 	}
 	return out
 }
@@ -121,16 +119,12 @@ func buildPosition(
 	tp, sl *float64,
 	instruments map[string]models.InstrumentDetails,
 	lotSizes map[string]float64,
-	closed bool,
 	reason string,
 ) domain.FXPosition {
 	closedAt := closes[len(closes)-1].Time
 	net := cash.Net()
 	symbol := opens[0].Symbol
 	amount := helpers.Quantity(opens)
-	if !closed {
-		amount = helpers.Quantity(closes)
-	}
 	pos := domain.FXPosition{
 		ID:          id,
 		Side:        side,
@@ -146,7 +140,7 @@ func buildPosition(
 		TP:          tp,
 		SL:          sl,
 		Multiplier:  helpers.Multiplier(instruments[symbol]),
-		Closed:      closed,
+		Closed:      true,
 		CloseReason: reason,
 		Status:      fx.Status(net),
 		CreatedAt:   opens[0].Time,

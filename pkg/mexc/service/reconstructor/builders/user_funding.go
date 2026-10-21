@@ -21,20 +21,3 @@ func BuildUserFundings(records []models.FundingRecord) []domain.UserFunding {
 	}
 	return result
 }
-
-func ExtractFundingForPosition(
-	records []models.FundingRecord,
-	symbol string,
-	startMs, endMs int64,
-) float64 {
-	var total float64
-	for _, r := range records {
-		if r.Symbol != symbol {
-			continue
-		}
-		if r.SettleTime >= startMs && r.SettleTime <= endMs {
-			total += r.Funding
-		}
-	}
-	return total
-}

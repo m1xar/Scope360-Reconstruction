@@ -37,8 +37,10 @@ func BuildFXPositions(
 		if len(closing) == 0 {
 			continue
 		}
-		closed := !openIDs[positionID] && (len(opening) == 0 || closedVolume(closing) >= filledTotal(opening))
-		positions = append(positions, buildFXPosition(positionID, opening, closing, groupedOrders[positionID], symbols, session, closed))
+		if openIDs[positionID] {
+			continue
+		}
+		positions = append(positions, buildFXPosition(positionID, opening, closing, groupedOrders[positionID], symbols, session))
 	}
 	fx.SortPositions(positions)
 	return positions
@@ -50,12 +52,8 @@ func buildFXPosition(
 	orders []*pb.ProtoOAOrder,
 	symbols helpers.Symbols,
 	session *connector.Session,
-	closed bool,
 ) domain.FXPosition {
 	id := strconv.FormatInt(positionID, 10)
-	if !closed {
-		id += ":partial"
-	}
 	first := closing[0]
 	if len(opening) > 0 {
 		first = opening[0]
@@ -97,7 +95,7 @@ func buildFXPosition(
 		TP:          tp,
 		SL:          sl,
 		Multiplier:  leverageMultiplier(session),
-		Closed:      closed,
+		Closed:      true,
 		CloseReason: closeReason(lastClose, orders),
 		Status:      fx.Status(net),
 		CreatedAt:   helpers.TimeFromMillis(first.GetExecutionTimestamp()),
@@ -179,14 +177,6 @@ func sortDeals(deals []*pb.ProtoOADeal) {
 func closedVolume(closing []*pb.ProtoOADeal) int64 {
 	var volume int64
 	for _, deal := range closing {
-		volume += filledVolume(deal)
-	}
-	return volume
-}
-
-func filledTotal(deals []*pb.ProtoOADeal) int64 {
-	var volume int64
-	for _, deal := range deals {
 		volume += filledVolume(deal)
 	}
 	return volume
