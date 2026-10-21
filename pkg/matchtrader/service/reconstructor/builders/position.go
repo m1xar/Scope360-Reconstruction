@@ -17,13 +17,15 @@ func BuildPositions(
 	groups := helpers.GroupClosed(events)
 	positions := make([]domain.FXPosition, 0, len(groups))
 	for id, list := range groups {
-		positions = append(positions, buildPosition(id, list, leverage, !openIDs[id]))
+		if !openIDs[id] {
+			positions = append(positions, buildPosition(id, list, leverage))
+		}
 	}
 	fx.SortPositions(positions)
 	return positions
 }
 
-func buildPosition(id string, events []models.ClosedPosition, leverage uint64, closed bool) domain.FXPosition {
+func buildPosition(id string, events []models.ClosedPosition, leverage uint64) domain.FXPosition {
 	first, last := events[0], events[len(events)-1]
 	side := fx.PositionSide(first.Side)
 
@@ -51,12 +53,8 @@ func buildPosition(id string, events []models.ClosedPosition, leverage uint64, c
 	entry := fx.Round8(fx.VWAP(entries))
 	tp, sl := fx.PriceOrNil(last.TakeProfit.Float()), fx.PriceOrNil(last.StopLoss.Float())
 
-	posID := id
-	if !closed {
-		posID = id + ":partial"
-	}
 	pos := domain.FXPosition{
-		ID:          posID,
+		ID:          id,
 		Side:        side,
 		Pair:        helpers.Pair(first.Alias, first.Symbol),
 		Symbol:      first.Symbol,
@@ -70,15 +68,15 @@ func buildPosition(id string, events []models.ClosedPosition, leverage uint64, c
 		TP:          tp,
 		SL:          sl,
 		Multiplier:  uint32(leverage),
-		Closed:      closed,
+		Closed:      true,
 		CloseReason: last.Reason(),
 		Status:      fx.Status(net),
 		CreatedAt:   openedAt,
 		ClosedAt:    &closedAt,
 	}
 	fx.ApplyRR(&pos)
-	opening := OpeningOrder(posID, first.Symbol, pos.Pair, side, amount, entry, openedAt)
+	opening := OpeningOrder(id, first.Symbol, pos.Pair, side, amount, entry, openedAt)
 	opening.TP, opening.SL = tp, sl
-	pos.Orders = append([]domain.FXOrder{opening}, ClosingOrders(events, posID, side)...)
+	pos.Orders = append([]domain.FXOrder{opening}, ClosingOrders(events, id, side)...)
 	return pos
 }
