@@ -137,7 +137,10 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 			addSynthetic(shortfall)
 		}
 		avg := inv.avg()
-		feeShare := inv.fee * leg.Qty / inv.qty
+		feeShare := 0.0
+		if inv.qty > 0 {
+			feeShare = inv.fee * leg.Qty / inv.qty
+		}
 		pos := spotClosedPosition(asset, leg, avg, helpers.SpotFeeUSD(leg)+feeShare, lotStart)
 		if synthetic {
 			pos.Orders[0].Status = helpers.OrderStatusSynthetic
