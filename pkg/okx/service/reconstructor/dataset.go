@@ -120,7 +120,7 @@ func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope
 			return nil
 		}),
 		when(s.Has(scope.Spot) && !s.Has(scope.Transactions), func() error {
-			bills, err := executors.FetchAllBills(client, baseURL, "", d.windowMs, "1")
+			bills, err := executors.FetchAllBills(client, baseURL, "", d.windowMs, "")
 			if err != nil {
 				return err
 			}
@@ -303,7 +303,7 @@ func (d *Dataset) SpotPositions() ([]domain.Position, []domain.OpenPosition, err
 		bills = d.bills
 	}
 	legs := append(spotLegs(d.spotOrders, pricer), transferLegs(bills, pricer)...)
-	closed, open := builders.BuildSpotPositions(legs, spotHoldings(d.balance), time.UnixMilli(d.windowMs).UTC(), pricer.price)
+	closed, open := builders.BuildSpotPositions(legs, spotHoldings(d.balance), time.UnixMilli(d.windowMs).UTC(), pricer.price, stableCashAt(bills, d.balance, d.spotOrders))
 	applySpotExcursions(d.client, d.baseURL, closed)
 	return closed, open, nil
 }

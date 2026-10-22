@@ -2,6 +2,7 @@ package reconstructor
 
 import (
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -185,6 +186,96 @@ func transferLegs(bills []models.Bill, pricer *usdPricer) []helpers.SpotLeg {
 		})
 	}
 	return legs
+}
+
+type cashFlow struct {
+	ts  int64
+	usd float64
+}
+
+func spotCashFlows(orders []models.Order) []cashFlow {
+	var flows []cashFlow
+	for _, ord := range orders {
+		if !helpers.IsFilled(ord) {
+			continue
+		}
+		parts := strings.SplitN(ord.InstId, "-", 2)
+		if len(parts) != 2 || !helpers.IsStableAsset(parts[1]) {
+			continue
+		}
+		ts := helpers.MustInt64(ord.UTime)
+		if t := helpers.MustInt64(ord.FillTime); t > 0 {
+			ts = t
+		}
+		amount := helpers.MustFloat(ord.AccFillSz) * helpers.MustFloat(ord.AvgPx)
+		fee := 0.0
+		if strings.EqualFold(ord.FeeCcy, parts[1]) {
+			fee = math.Abs(helpers.MustFloat(ord.Fee))
+		}
+		if strings.EqualFold(ord.Side, "buy") {
+			flows = append(flows, cashFlow{ts: ts, usd: -amount - fee})
+		} else {
+			flows = append(flows, cashFlow{ts: ts, usd: amount - fee})
+		}
+	}
+	return flows
+}
+
+func stableCashAt(bills []models.Bill, balance models.Balance, orders []models.Order) helpers.CashAt {
+	byCcy := map[string][]models.Bill{}
+	for _, b := range bills {
+		if b.Bal != "" && helpers.IsStableAsset(b.Ccy) {
+			ccy := strings.ToUpper(b.Ccy)
+			byCcy[ccy] = append(byCcy[ccy], b)
+		}
+	}
+	for _, list := range byCcy {
+		sort.SliceStable(list, func(i, j int) bool {
+			ti, tj := helpers.MustInt64(list[i].Ts), helpers.MustInt64(list[j].Ts)
+			if ti != tj {
+				return ti < tj
+			}
+			return helpers.MustInt64(list[i].BillId) < helpers.MustInt64(list[j].BillId)
+		})
+	}
+	current := map[string]float64{}
+	for _, d := range balance.Details {
+		if helpers.IsStableAsset(d.Ccy) {
+			current[strings.ToUpper(d.Ccy)] = helpers.MustFloat(d.CashBal)
+		}
+	}
+	horizon := int64(math.MaxInt64)
+	for _, list := range byCcy {
+		if first := helpers.MustInt64(list[0].Ts); first < horizon {
+			horizon = first
+		}
+	}
+	flows := spotCashFlows(orders)
+
+	return func(ts int64) float64 {
+		total := 0.0
+		for ccy, cash := range current {
+			if _, ok := byCcy[ccy]; !ok {
+				total += cash
+			}
+		}
+		for _, list := range byCcy {
+			i := sort.Search(len(list), func(k int) bool { return helpers.MustInt64(list[k].Ts) > ts })
+			if i > 0 {
+				total += helpers.MustFloat(list[i-1].Bal)
+			} else {
+				total += helpers.MustFloat(list[0].Bal) - helpers.MustFloat(list[0].BalChg)
+			}
+		}
+		if ts < horizon {
+			for _, f := range flows {
+				if f.ts > ts && f.ts < horizon {
+					total -= f.usd
+				}
+			}
+		}
+		return total
+	}
 }
 
 func spotHoldings(balance models.Balance) []helpers.SpotHolding {
