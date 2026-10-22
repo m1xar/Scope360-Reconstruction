@@ -38,9 +38,11 @@ func buildClosedPositions(
 	allOrders []models.Order,
 	fills []models.Fill,
 	fillsErr error,
+	algos []models.AlgoOrder,
 	instruments map[string]models.Instrument,
 ) []domain.Position {
 	ordersByInst := helpers.GroupOrdersByInst(allOrders)
+	algosByInst := helpers.GroupAlgosByInst(algos)
 	parents := helpers.OrdersByID(allOrders)
 	fillsByInst := helpers.GroupFillsByInst(fills)
 
@@ -69,7 +71,7 @@ func buildClosedPositions(
 		if len(posOrders) == 0 {
 			posOrders = helpers.MatchOrdersToPosition(cp, ordersByInst, instruments[cp.InstId])
 		}
-		pos, err := helpers.BuildPosition(cp, posOrders, instruments[cp.InstId])
+		pos, err := helpers.BuildPosition(cp, posOrders, algosByInst[cp.InstId], instruments[cp.InstId])
 		if err != nil {
 			continue
 		}

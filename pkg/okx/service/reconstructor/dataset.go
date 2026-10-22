@@ -1,6 +1,7 @@
 package reconstructor
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -30,6 +31,11 @@ type Dataset struct {
 	fills    []models.Fill
 	fillsErr error
 	ordersOK bool
+	algos    []models.AlgoOrder
+
+	spotOrders []models.Order
+	spotOK     bool
+	spotBills  []models.Bill
 
 	bills   []models.Bill
 	billsOK bool
@@ -66,7 +72,7 @@ func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope
 			d.open = open
 			return nil
 		}),
-		when(s.Any(scope.Closed|scope.Balances), func() error {
+		when(s.Any(scope.Closed|scope.Balances|scope.Spot), func() error {
 			bal, err := executors.FetchBalance(client, baseURL)
 			if err != nil {
 				balErr = err
@@ -75,11 +81,19 @@ func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope
 			d.balance, d.balOK = bal, true
 			return nil
 		}),
+		when(s.Has(scope.Spot), func() error {
+			orders, err := executors.FetchAllOrders(client, baseURL, "SPOT", d.windowMs)
+			if err != nil {
+				return err
+			}
+			d.spotOrders, d.spotOK = orders, true
+			return nil
+		}),
 	)
 	if err != nil {
 		return nil, err
 	}
-	if !d.balOK && s.Has(scope.Balances) {
+	if !d.balOK && s.Any(scope.Balances|scope.Spot) {
 		return nil, balErr
 	}
 
@@ -96,6 +110,21 @@ func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope
 				return nil
 			}
 			d.orders, d.fills, d.fillsErr, d.ordersOK = orders, fills, fillsErr, true
+			return nil
+		}),
+		when(ordersFrom > 0 && s.Has(scope.Closed) && len(d.closed) > 0, func() error {
+			algos, err := executors.FetchAllAlgoOrders(client, baseURL, ordersFrom)
+			if err == nil {
+				d.algos = algos
+			}
+			return nil
+		}),
+		when(s.Has(scope.Spot) && !s.Has(scope.Transactions), func() error {
+			bills, err := executors.FetchAllBills(client, baseURL, "", d.windowMs, "1")
+			if err != nil {
+				return err
+			}
+			d.spotBills = bills
 			return nil
 		}),
 		when(billsWanted, func() error {
@@ -248,7 +277,7 @@ func (d *Dataset) ClosedPositions() ([]domain.Position, error) {
 	if len(d.closed) == 0 {
 		return []domain.Position{}, nil
 	}
-	positions := buildClosedPositions(d.client, d.baseURL, d.closed, d.orders, d.fills, d.fillsErr, d.instruments)
+	positions := buildClosedPositions(d.client, d.baseURL, d.closed, d.orders, d.fills, d.fillsErr, d.algos, d.instruments)
 	helpers.AttachBalanceInit(&positions, d.allSnapshots())
 	return positions, nil
 }
@@ -262,6 +291,21 @@ func (d *Dataset) OpenPositions() ([]domain.OpenPosition, error) {
 		enrichOpenPositionOrders(d.orders, d.fills, d.fillsErr, d.open, positions, d.instruments)
 	}
 	return positions, nil
+}
+
+func (d *Dataset) SpotPositions() ([]domain.Position, []domain.OpenPosition, error) {
+	if !d.spotOK || !d.balOK {
+		return nil, nil, fmt.Errorf("okx: spot dataset not loaded")
+	}
+	pricer := newUSDPricer(d.client, d.baseURL)
+	bills := d.spotBills
+	if d.scope.Has(scope.Transactions) && d.billsOK {
+		bills = d.bills
+	}
+	legs := append(spotLegs(d.spotOrders, pricer), transferLegs(bills, pricer)...)
+	closed, open := builders.BuildSpotPositions(legs, spotHoldings(d.balance), time.UnixMilli(d.windowMs).UTC(), pricer.price)
+	applySpotExcursions(d.client, d.baseURL, closed)
+	return closed, open, nil
 }
 
 func (d *Dataset) BalanceSnapshots() []domain.UserBalanceSnapshot {

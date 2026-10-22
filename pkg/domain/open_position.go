@@ -17,4 +17,5 @@ type OpenPosition struct {
 	CurrentPrice float64
 	OpenTime     time.Time
 	Orders       []Order
+	IsSpot       bool
 }

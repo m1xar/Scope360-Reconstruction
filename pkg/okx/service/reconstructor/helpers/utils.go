@@ -109,18 +109,27 @@ func IsFilled(order models.Order) bool {
 }
 
 func NormalizePair(instId string) string {
-	second := strings.Index(instId[strings.Index(instId, "-")+1:], "-")
-	base := instId
-	if first := strings.Index(instId, "-"); first != -1 && second != -1 {
-		base = instId[:first+1+second]
+	separators := 0
+	for i, r := range instId {
+		if isAlnum(r) {
+			continue
+		}
+		separators++
+		if separators == 2 {
+			return stripSpecial(instId[:i])
+		}
 	}
-	return stripSpecial(base)
+	return stripSpecial(instId)
+}
+
+func isAlnum(r rune) bool {
+	return (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
 }
 
 func stripSpecial(s string) string {
 	var b strings.Builder
 	for _, r := range s {
-		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+		if isAlnum(r) {
 			b.WriteRune(r)
 		}
 	}
