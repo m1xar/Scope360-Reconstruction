@@ -43,9 +43,12 @@ func Sync(
 	}
 
 	out := &domain.Sync{}
+	var spotClosed []domain.Position
+	var spotOpen []domain.OpenPosition
 	err = parallel.Run(
 		func() (err error) { out.Positions, err = d.ClosedPositions(); return err },
 		func() (err error) { out.OpenPositions, err = d.OpenPositions(); return err },
+		func() (err error) { spotClosed, spotOpen, err = d.SpotPositions(); return err },
 		func() error { out.BalanceSnapshots = d.BalanceSnapshots(); return nil },
 		func() error { out.Transactions = d.Transactions(); return nil },
 		func() error { out.Fundings = d.Fundings(); return nil },
@@ -53,8 +56,23 @@ func Sync(
 	if err != nil {
 		return nil, err
 	}
+	out.Positions = append(out.Positions, spotClosed...)
+	out.OpenPositions = append(out.OpenPositions, spotOpen...)
 	out.CurrentBalance = d.CurrentBalance()
 	return out, nil
+}
+
+func GetSpotPositions(
+	client *resty.Client,
+	creds okxclient.Credentials,
+	baseURL string,
+	days int,
+) ([]domain.Position, []domain.OpenPosition, error) {
+	d, err := load(client, creds, baseURL, days, scope.Spot)
+	if err != nil {
+		return nil, nil, err
+	}
+	return d.SpotPositions()
 }
 
 func GetClosedPositionByExactMatch(

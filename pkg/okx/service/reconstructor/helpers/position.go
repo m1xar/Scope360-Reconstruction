@@ -13,6 +13,7 @@ import (
 func BuildPosition(
 	cp models.ClosedPosition,
 	orders []models.Order,
+	algos []models.AlgoOrder,
 	instrument models.Instrument,
 ) (domain.Position, error) {
 	posID, err := uuid.NewV7()
@@ -40,6 +41,21 @@ func BuildPosition(
 	lever := uint32(MustFloat(cp.Lever))
 
 	tp, sl := ProtectiveLevels(orders, side)
+	if tp == nil || sl == nil {
+		algoTp, algoSl := AlgoLevels(algos, PositionScope{
+			InstId:  cp.InstId,
+			PosSide: cp.Direction,
+			MgnMode: cp.MgnMode,
+			FromMs:  MustInt64(cp.CTime),
+			ToMs:    MustInt64(cp.UTime),
+		})
+		if tp == nil {
+			tp = algoTp
+		}
+		if sl == nil {
+			sl = algoSl
+		}
+	}
 
 	var rr, rrPlanned *float64
 	if sl != nil {
