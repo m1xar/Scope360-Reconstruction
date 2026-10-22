@@ -115,8 +115,6 @@ func GetHighLow(candles []models.Candle) (high, low *float64) {
 	return &h, &l
 }
 
-// ApplyMAEMFE sets MAE/MFE from the high/low of the bars inside the position;
-// high/low are nil when no bar lies fully inside it.
 func ApplyMAEMFE(pos *domain.Position, high, low *float64) {
 	pos.MAE, pos.MFE = excursion.Compute(pos.Side, pos.EntryPrice, pos.Amount, high, low, pos.Pnl, pos.NetPnl)
 }

@@ -2,19 +2,18 @@ package helpers
 
 import (
 	"math"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 	"github.com/m1xar/scope360-reconstruction/pkg/mexc/connector/mexc/models"
+	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/excursion"
 )
 
 func Round8(val float64) float64 {
 	return math.Round(val*1e8) / 1e8
 }
 
-// CandleOpenMs returns the candle open time in ms; the kline API reports seconds.
 func CandleOpenMs(c models.Candle) int64 {
 	if c.Time < 1e12 {
 		return c.Time * 1000
@@ -116,34 +115,18 @@ func IsStableCurrency(currency string) bool {
 	}
 }
 
-func ContractVolumeToBase(volume, contractSize float64) float64 {
-	if contractSize <= 0 {
-		return volume
-	}
-	return volume * contractSize
-}
+func ApplyMAEMFE(pos *domain.Position, high, low *float64) {
+	entry := pos.EntryPrice
+	exit := pos.ExitPrice
 
-func OrderSign(side int) float64 {
-	switch side {
-	case 3, 4:
-		return -1
-	default:
-		return 1
+	amount := pos.Amount
+	priceDelta := exit - entry
+	if pos.Side == "SHORT" {
+		priceDelta = entry - exit
 	}
-}
+	if priceDelta != 0 {
+		amount = math.Abs(pos.Pnl / priceDelta)
+	}
 
-func PositionTypeOf(order models.Order) int {
-	if order.PositionType > 0 {
-		return order.PositionType
-	}
-	switch order.Side {
-	case 2, 3:
-		return 2
-	default:
-		return 1
-	}
-}
-
-func PositionKey(symbol string, positionType int) string {
-	return symbol + "|" + strconv.Itoa(positionType)
+	pos.MAE, pos.MFE = excursion.Compute(pos.Side, entry, amount, high, low, pos.Pnl, pos.NetPnl)
 }

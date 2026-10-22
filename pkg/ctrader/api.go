@@ -197,6 +197,17 @@ func GetCandles(
 	return helpers.CandlesFromTrendbars(pair, interval, bars), nil
 }
 
+func GetContractSizes(
+	client *connector.Client,
+	cfg connector.Config,
+) ([]domain.FXSymbolSpec, error) {
+	d, err := load(client, cfg, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	return d.ContractSizes()
+}
+
 func NormalizeSymbol(symbolName string) string {
 	return fx.NormalizePair(symbolName)
 }

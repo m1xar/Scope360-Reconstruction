@@ -42,7 +42,7 @@ func BuildOpenPositions(
 				related = append(related, o)
 			}
 		}
-		built := BuildOrders(related, code, lotSizes, ledger)
+		built := BuildOrders(related, code, lotSizes)
 		for i := range built {
 			if built[i].Amount == 0 && built[i].Status == fx.StatusWorking {
 				built[i].Amount = amount
@@ -63,6 +63,7 @@ func BuildOpenPositions(
 			Margin:        fpl[code].Margin.Float(),
 			OpenTime:      p.OpenTime.Time,
 			Orders:        built,
+			ContractSize:  helpers.ContractSize(lotSizes, p.Symbol),
 		})
 	}
 	return out

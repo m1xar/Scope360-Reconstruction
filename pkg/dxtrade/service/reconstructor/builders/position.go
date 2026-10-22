@@ -21,7 +21,7 @@ func BuildFXPositions(
 	if hedging {
 		out = buildHedging(orders, ledger, open, instruments, lotSizes)
 	} else {
-		out = buildNetting(orders, open, instruments, lotSizes, ledger)
+		out = buildNetting(orders, open, instruments, lotSizes)
 	}
 	fx.SortPositions(out)
 	return out
@@ -54,9 +54,6 @@ func buildHedging(
 
 	var out []domain.FXPosition
 	for _, code := range codes {
-		if openCodes[code] {
-			continue
-		}
 		group := groups[code]
 		var opens, closes []helpers.Fill
 		side := ""
@@ -72,13 +69,18 @@ func buildHedging(
 			opens = append(opens, fills...)
 		}
 		openQty, closeQty := helpers.Quantity(opens), helpers.Quantity(closes)
-		if openQty <= helpers.Epsilon || closeQty+helpers.Epsilon*max(1, openQty) < openQty {
+		if openQty <= helpers.Epsilon || closeQty <= helpers.Epsilon {
 			continue
 		}
 		helpers.SortFills(opens)
 		helpers.SortFills(closes)
+		closed := !openCodes[code] && closeQty+helpers.Epsilon*max(1, openQty) >= openQty
 		tp, sl := Protection(group, closes[len(closes)-1].Time)
-		out = append(out, buildPosition(code, side, opens, closes, helpers.SumEntries(cash[code]), BuildOrders(group, code, lotSizes, ledger), tp, sl, instruments, lotSizes, closeReason(group, closes[len(closes)-1])))
+		posID := code
+		if !closed {
+			posID = code + ":partial"
+		}
+		out = append(out, buildPosition(posID, side, opens, closes, helpers.SumEntries(cash[code]), BuildOrders(group, posID, lotSizes), tp, sl, instruments, lotSizes, closed, closeReason(group, closes[len(closes)-1])))
 	}
 	return out
 }
@@ -119,33 +121,38 @@ func buildPosition(
 	tp, sl *float64,
 	instruments map[string]models.InstrumentDetails,
 	lotSizes map[string]float64,
+	closed bool,
 	reason string,
 ) domain.FXPosition {
 	closedAt := closes[len(closes)-1].Time
 	net := cash.Net()
 	symbol := opens[0].Symbol
 	amount := helpers.Quantity(opens)
+	if !closed {
+		amount = helpers.Quantity(closes)
+	}
 	pos := domain.FXPosition{
-		ID:          id,
-		Side:        side,
-		Pair:        fx.NormalizePair(symbol),
-		Symbol:      symbol,
-		Amount:      helpers.Lots(lotSizes, symbol, amount),
-		EntryPrice:  helpers.VWAP(opens),
-		ExitPrice:   helpers.VWAP(closes),
-		Pnl:         fx.Round8(cash.Settlement),
-		NetPnl:      fx.Round8(net),
-		Commission:  fx.Round8(abs(cash.Commission)),
-		Swap:        fx.Round8(cash.Financing),
-		TP:          tp,
-		SL:          sl,
-		Multiplier:  helpers.Multiplier(instruments[symbol]),
-		Closed:      true,
-		CloseReason: reason,
-		Status:      fx.Status(net),
-		CreatedAt:   opens[0].Time,
-		ClosedAt:    &closedAt,
-		Orders:      orders,
+		ID:           id,
+		Side:         side,
+		Pair:         fx.NormalizePair(symbol),
+		Symbol:       symbol,
+		Amount:       helpers.Lots(lotSizes, symbol, amount),
+		EntryPrice:   helpers.VWAP(opens),
+		ExitPrice:    helpers.VWAP(closes),
+		Pnl:          fx.Round8(cash.Settlement),
+		NetPnl:       fx.Round8(net),
+		Commission:   fx.Round8(abs(cash.Commission)),
+		Swap:         fx.Round8(cash.Financing),
+		TP:           tp,
+		SL:           sl,
+		Multiplier:   helpers.Multiplier(instruments[symbol]),
+		Closed:       closed,
+		CloseReason:  reason,
+		Status:       fx.Status(net),
+		CreatedAt:    opens[0].Time,
+		ClosedAt:     &closedAt,
+		Orders:       orders,
+		ContractSize: helpers.ContractSize(lotSizes, symbol),
 	}
 	fx.ApplyRR(&pos)
 	return pos

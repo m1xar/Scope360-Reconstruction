@@ -83,6 +83,7 @@ func BuildOpenPositions(
 			Margin:        fx.Round8(helpers.Money(int64(pos.GetUsedMargin()), digits)),
 			OpenTime:      openedAt,
 			Orders:        orders,
+			ContractSize:  symbols.ContractSize(symbolID),
 		})
 	}
 	return out

@@ -13,8 +13,6 @@ import (
 const (
 	futuresBaseURL = "https://fapi.binance.com"
 
-	// Public klines are weight-cheap, but HL reconstruction can stampede them.
-	// Serialize + pace across the whole process.
 	maxInFlightKlines = 1
 	pageGap           = 150 * time.Millisecond
 	rateLimitSleep    = 2 * time.Second
@@ -23,9 +21,6 @@ const (
 
 var klineGate = make(chan struct{}, maxInFlightKlines)
 
-// newFuturesKlineClient is intentionally separate from the Hyperliquid resty
-// client. Callers often pass an HL client with RetryCount>0 on 429; inheriting
-// that policy stampses fapi.binance.com. Pacing/backoff live in this package.
 func newFuturesKlineClient() *resty.Client {
 	return resty.New().
 		SetTimeout(20 * time.Second).

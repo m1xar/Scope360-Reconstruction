@@ -12,7 +12,6 @@ const fundingRecordsPath = "/api/v1/private/position/funding_records"
 
 const fundingPageSize = 100
 
-// FetchAllFundingRecords pages funding (newest first) back to sinceMs; 0 pages everything.
 func FetchAllFundingRecords(client *resty.Client, sinceMs int64) ([]models.FundingRecord, error) {
 	var result []models.FundingRecord
 	page := 1

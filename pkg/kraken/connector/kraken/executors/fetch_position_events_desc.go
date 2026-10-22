@@ -10,9 +10,6 @@ import (
 
 const positionEventsPageSize = 1000
 
-// FetchPositionEventsPageDesc returns one page of position events for a
-// tradeable, newest first; pass the previous page's continuation token to
-// go further back.
 func FetchPositionEventsPageDesc(client *resty.Client, tradeable, continuation string) (models.PositionEventsResponse, error) {
 	params := map[string]string{
 		"sort":      "desc",

@@ -10,14 +10,12 @@ import (
 
 const candlesPath = "/api/v1/contract/kline/%s"
 
-// standardToMexc maps standard (Hyperliquid) interval format to MEXC API format.
 var standardToMexc = map[string]string{
 	"1m": "Min1", "5m": "Min5", "15m": "Min15", "30m": "Min30",
 	"1h": "Min60", "4h": "Hour4", "8h": "Hour8",
 	"1d": "Day1", "1w": "Week1", "1M": "Month1",
 }
 
-// candlesPerRequest keeps each call under MEXC's 2000-bar response cap.
 const candlesPerRequest = 1000
 
 var intervalMs = map[string]int64{

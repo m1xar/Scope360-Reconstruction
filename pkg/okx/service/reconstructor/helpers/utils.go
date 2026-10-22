@@ -23,26 +23,15 @@ func Round8(val float64) float64 {
 	return math.Round(val*1e8) / 1e8
 }
 
-func ContractsToBase(size string, instrument models.Instrument) float64 {
-	ctVal := MustFloat(instrument.CtVal)
-	if ctVal == 0 {
-		ctVal = 1
+func SideFromDirection(dir string) string {
+	switch strings.ToLower(dir) {
+	case "long":
+		return "LONG"
+	case "short":
+		return "SHORT"
+	default:
+		return strings.ToUpper(dir)
 	}
-	return MustFloat(size) * ctVal
-}
-
-func OldestOpenMs(positions []models.OpenPosition) int64 {
-	oldest := int64(0)
-	for _, p := range positions {
-		ts := MustInt64(p.CTime)
-		if ts == 0 {
-			continue
-		}
-		if oldest == 0 || ts < oldest {
-			oldest = ts
-		}
-	}
-	return oldest
 }
 
 func SideFromPosSide(posSide, pos string) string {

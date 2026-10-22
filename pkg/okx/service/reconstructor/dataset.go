@@ -1,7 +1,6 @@
 package reconstructor
 
 import (
-	"sort"
 	"sync"
 	"time"
 
@@ -10,9 +9,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/executors"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/models"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/builders"
-	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/envelope"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/helpers"
-	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/workers"
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/parallel"
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/scope"
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/window"
@@ -25,14 +22,14 @@ type Dataset struct {
 	scope    scope.Scope
 	windowMs int64
 
+	closed      []models.ClosedPosition
 	open        []models.OpenPosition
 	instruments map[string]models.Instrument
 
-	fills      []models.Fill
-	groups     [][]models.Fill
-	openFills  map[string][]models.Fill
-	earliestMs int64
-	orders     []models.Order
+	orders   []models.Order
+	fills    []models.Fill
+	fillsErr error
+	ordersOK bool
 
 	bills   []models.Bill
 	billsOK bool
@@ -41,22 +38,27 @@ type Dataset struct {
 
 	snapOnce  sync.Once
 	snapshots []domain.UserBalanceSnapshot
-
-	closedOnce sync.Once
-	closed     []domain.Position
-	closedErr  error
 }
 
 func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope) (*Dataset, error) {
 	d := &Dataset{client: client, baseURL: baseURL, cutoff: cutoff, scope: s}
-	d.windowMs = window.StartMs(cutoff)
+	cutoffMs := window.StartMs(cutoff)
+	d.windowMs = cutoffMs
 	if d.windowMs <= 0 {
 		d.windowMs = executors.BillsDefaultStartMs()
 	}
 
 	var balErr error
 	err := parallel.Run(
-		when(s.Any(scope.Closed|scope.Open), func() error {
+		when(s.Has(scope.Closed), func() error {
+			closed, err := executors.FetchAllClosedPositions(client, baseURL, cutoffMs)
+			if err != nil {
+				return err
+			}
+			d.closed = closedPositionsAfter(closed, cutoffMs)
+			return nil
+		}),
+		when(s.Has(scope.Open), func() error {
 			open, err := executors.FetchOpenPositions(client, baseURL)
 			if err != nil {
 				return err
@@ -81,47 +83,19 @@ func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope
 		return nil, balErr
 	}
 
-	reachMs := int64(0)
-	if s.Has(scope.Open) {
-		reachMs = helpers.OldestOpenMs(d.open)
-	}
-	ordersFrom := reachMs
-	if s.Has(scope.Closed) {
-		walk, err := collectClosedEpisodes(client, baseURL, d.open, cutoff, reachMs)
-		if err != nil {
-			return nil, err
-		}
-		d.fills = walk.Fills
-		d.groups = GroupsClosedAfter(walk.Groups, cutoff)
-		d.openFills = walk.OpenFills
-		d.earliestMs = earliestOpenMs(d.groups)
-		if d.earliestMs > 0 && (ordersFrom == 0 || d.earliestMs < ordersFrom) {
-			ordersFrom = d.earliestMs
-		}
-	} else if s.Has(scope.Open) && reachMs > 0 {
-		fills, err := executors.FetchAllSwapAndFuturesFills(client, baseURL, reachMs)
-		if err != nil {
-			return nil, err
-		}
-		segmenter := helpers.NewFillSegmenter(d.open)
-		segmenter.PushOlderBatch(fills)
-		d.fills = fills
-		d.openFills = segmenter.OpenFills()
-	}
-	if ordersFrom > 0 {
-		ordersFrom -= openPositionOrdersLookback.Milliseconds()
-	}
-
+	ordersFrom, fillsFrom := d.orderRanges()
 	billsFrom, billsWanted := d.billsRange()
 	identifiers := d.identifiers()
 
-	return d, parallel.Run(
-		when(ordersFrom > 0 && (len(d.groups) > 0 || len(d.open) > 0), func() error {
-			orders, err := executors.FetchAllSwapAndFuturesOrders(client, baseURL, ordersFrom)
+	var ordersErr error
+	err = parallel.Run(
+		when(fillsFrom > 0, func() error {
+			orders, fills, fillsErr, err := fetchOrdersAndFills(client, baseURL, ordersFrom, fillsFrom)
 			if err != nil {
-				return err
+				ordersErr = err
+				return nil
 			}
-			d.orders = orders
+			d.orders, d.fills, d.fillsErr, d.ordersOK = orders, fills, fillsErr, true
 			return nil
 		}),
 		when(billsWanted, func() error {
@@ -144,6 +118,13 @@ func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope
 			return nil
 		}),
 	)
+	if err != nil {
+		return nil, err
+	}
+	if !d.ordersOK && ordersErr != nil && s.Has(scope.Closed) && len(d.closed) > 0 {
+		return nil, ordersErr
+	}
+	return d, nil
 }
 
 func when(cond bool, fn func() error) func() error {
@@ -153,13 +134,34 @@ func when(cond bool, fn func() error) func() error {
 	return fn
 }
 
+func (d *Dataset) orderRanges() (ordersFrom, fillsFrom int64) {
+	set := func(o, f int64) {
+		if ordersFrom == 0 || o < ordersFrom {
+			ordersFrom = o
+		}
+		if fillsFrom == 0 || f < fillsFrom {
+			fillsFrom = f
+		}
+	}
+	if d.scope.Has(scope.Closed) && len(d.closed) > 0 {
+		oldest := oldestClosedMs(d.closed) - 10*60*1000
+		set(oldest, oldest)
+	}
+	if d.scope.Has(scope.Open) {
+		if start := oldestOpenMs(d.open); start > 0 {
+			set(start-openPositionOrdersLookback, start)
+		}
+	}
+	return ordersFrom, fillsFrom
+}
+
 func (d *Dataset) billsRange() (int64, bool) {
 	from, wanted := int64(0), false
 	if d.scope.Any(scope.Balances | scope.Transactions | scope.Fundings) {
 		from, wanted = d.windowMs, true
 	}
-	if d.scope.Has(scope.Closed) && d.earliestMs > 0 {
-		oldest := d.earliestMs - billsLookback.Milliseconds()
+	if d.scope.Has(scope.Closed) && len(d.closed) > 0 {
+		oldest := oldestClosedMs(d.closed) - 10*60*1000
 		if !wanted || oldest < from {
 			from = oldest
 		}
@@ -181,25 +183,41 @@ func (d *Dataset) fetchBills(from int64) ([]models.Bill, error) {
 
 func (d *Dataset) identifiers() map[string]models.Instrumentidentifier {
 	identifiers := map[string]models.Instrumentidentifier{}
-	add := func(instID, instType string) {
-		if _, ok := identifiers[instID]; !ok {
-			identifiers[instID] = models.Instrumentidentifier{InstID: instID, InstType: instType}
-		}
-	}
-	for _, group := range d.groups {
-		for _, f := range group {
-			add(f.InstId, f.InstType)
-		}
-	}
-	for _, fills := range d.openFills {
-		for _, f := range fills {
-			add(f.InstId, f.InstType)
+	for _, cp := range d.closed {
+		if _, ok := identifiers[cp.InstId]; !ok {
+			identifiers[cp.InstId] = models.Instrumentidentifier{InstID: cp.InstId, InstType: cp.InstType}
 		}
 	}
 	for _, op := range d.open {
-		add(op.InstId, op.InstType)
+		if _, ok := identifiers[op.InstId]; !ok {
+			identifiers[op.InstId] = models.Instrumentidentifier{InstID: op.InstId, InstType: op.InstType}
+		}
 	}
 	return identifiers
+}
+
+func oldestClosedMs(closed []models.ClosedPosition) int64 {
+	oldest := helpers.MustInt64(closed[0].CTime)
+	for _, cp := range closed[1:] {
+		if t := helpers.MustInt64(cp.CTime); t < oldest {
+			oldest = t
+		}
+	}
+	return oldest
+}
+
+func oldestOpenMs(open []models.OpenPosition) int64 {
+	start := int64(0)
+	for _, r := range open {
+		t := helpers.MustInt64(r.CTime)
+		if t == 0 {
+			continue
+		}
+		if start == 0 || t < start {
+			start = t
+		}
+	}
+	return start
 }
 
 func (d *Dataset) swapFuturesBills() []models.Bill {
@@ -227,50 +245,23 @@ func (d *Dataset) allSnapshots() []domain.UserBalanceSnapshot {
 }
 
 func (d *Dataset) ClosedPositions() ([]domain.Position, error) {
-	d.closedOnce.Do(func() { d.closed, d.closedErr = d.buildClosed() })
-	return d.closed, d.closedErr
-}
-
-func (d *Dataset) buildClosed() ([]domain.Position, error) {
-	if len(d.groups) == 0 {
+	if len(d.closed) == 0 {
 		return []domain.Position{}, nil
 	}
-
-	candleRequests := make(chan helpers.CandleRequest, defaultCandleWorkers)
-	workers.StartCandleWorkers(d.client, d.baseURL, candleRequests, defaultCandleWorkers)
-
-	envelopes := make(chan envelope.PositionEnvelope)
-	positionsCh := make(chan domain.Position)
-
-	go func() {
-		ReconstructPositions(
-			d.groups, helpers.OrdersByID(d.orders), d.swapFuturesBills(), d.instruments,
-			candleRequests, envelopes,
-		)
-		close(envelopes)
-		close(candleRequests)
-	}()
-
-	workers.StartPositionBuilders(envelopes, positionsCh, defaultPositionWorkers)
-
-	positions := make([]domain.Position, 0)
-	for pos := range positionsCh {
-		positions = append(positions, pos)
-	}
-
-	sort.Slice(positions, func(i, j int) bool {
-		return positions[i].ClosedAt.Before(*positions[j].ClosedAt)
-	})
-
+	positions := buildClosedPositions(d.client, d.baseURL, d.closed, d.orders, d.fills, d.fillsErr, d.instruments)
 	helpers.AttachBalanceInit(&positions, d.allSnapshots())
 	return positions, nil
 }
 
 func (d *Dataset) OpenPositions() ([]domain.OpenPosition, error) {
-	if len(d.open) == 0 {
-		return []domain.OpenPosition{}, nil
+	positions := make([]domain.OpenPosition, 0, len(d.open))
+	for _, r := range d.open {
+		positions = append(positions, builders.BuildOpenPosition(r, d.instruments[r.InstId]))
 	}
-	return builders.BuildOpenPositions(d.open, d.openFills, d.fills, helpers.OrdersByID(d.orders), d.instruments), nil
+	if d.ordersOK {
+		enrichOpenPositionOrders(d.orders, d.fills, d.fillsErr, d.open, positions, d.instruments)
+	}
+	return positions, nil
 }
 
 func (d *Dataset) BalanceSnapshots() []domain.UserBalanceSnapshot {

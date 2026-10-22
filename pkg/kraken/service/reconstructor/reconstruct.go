@@ -75,9 +75,6 @@ func collectClosedEpisodes(
 	return walk, nil
 }
 
-// walkFillsBack pages the fill history newest first, handing each page's
-// unseen fills and its oldest fill time to visit, until visit asks to stop,
-// the history is exhausted or the lookback floor is reached.
 func walkFillsBack(client *resty.Client, visit func(fresh []models.Fill, oldest time.Time) (stop bool)) error {
 	var (
 		floor  = time.Now().Add(-maxFillLookback)
@@ -226,10 +223,6 @@ func EnrichOpenPositionOrders(
 		return
 	}
 
-	// Kraken reports the epoch as fillTime for open positions and its fills
-	// omit liquidations, so each position's orders come from its position
-	// events, walked newest first down to the event that opened it. Fills
-	// are the fallback when the events are unavailable.
 	var openFills map[string][]models.Fill
 	posIdx := 0
 	for _, rawPos := range raw {
@@ -262,15 +255,8 @@ func EnrichOpenPositionOrders(
 	}
 }
 
-// openEventsMaxPages caps the walk back through a symbol's position events
-// (1000 per page; funding adds one event per hour while a position is open,
-// so 30 pages cover well over three years).
 const openEventsMaxPages = 30
 
-// collectOpenEvents returns the execution events of the current position on
-// symbol, oldest first, starting with the event that opened it (from flat
-// or by flipping through zero). Nil when no opening event was found within
-// openEventsMaxPages.
 func collectOpenEvents(client *resty.Client, symbol string) ([]models.PositionUpdate, error) {
 	var collected []models.PositionUpdate
 	continuation := ""
@@ -302,9 +288,6 @@ func collectOpenEvents(client *resty.Client, symbol string) ([]models.PositionUp
 	return nil, nil
 }
 
-// collectOpenFills pages fills newest first until the walker seeded with the
-// open positions is resolved (or the lookback floor is hit) and returns the
-// fills of each open position, oldest first, keyed by symbol.
 func collectOpenFills(client *resty.Client, openPositions []models.OpenPosition) (map[string][]models.Fill, error) {
 	segmenter := helpers.NewFillSegmenter(openPositions)
 	if segmenter.Resolved() {

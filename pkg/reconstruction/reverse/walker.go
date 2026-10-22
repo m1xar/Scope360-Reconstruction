@@ -36,9 +36,6 @@ func SeedFromMap(positions map[string]float64) func(string) float64 {
 	return func(key string) float64 { return positions[key] }
 }
 
-// NewSeededWalker starts every key in seeds at its size up front, so
-// Resolved() is false until each of them has been walked back to zero, even
-// for a key that has not produced a fill yet.
 func NewSeededWalker[T any](seeds map[string]float64) *Walker[T] {
 	w := NewWalker[T](nil)
 	for key, size := range seeds {
@@ -90,8 +87,6 @@ func (w *Walker[T]) Push(key string, delta float64, fill T) (Group[T], bool) {
 	}
 
 	if !w.startedFlat[key] {
-		// These fills walked a seeded (still open) position back to zero:
-		// they are the fills that opened it.
 		w.opened[key] = append(fills, w.opened[key]...)
 		return Group[T]{}, false
 	}
@@ -107,9 +102,6 @@ func (w *Walker[T]) Flat() bool {
 	return true
 }
 
-// Resolved reports whether every seeded position has been walked back to zero
-// and no fills are pending: the walk has reached the opening fill of each
-// currently open position.
 func (w *Walker[T]) Resolved() bool {
 	for _, pos := range w.position {
 		if pos != 0 {
@@ -119,10 +111,6 @@ func (w *Walker[T]) Resolved() bool {
 	return w.Flat()
 }
 
-// OpenFills returns, oldest first, the fills that belong to the seeded (open)
-// positions: those that walked them back to zero plus any still buffered.
-// After a resolved walk these are exactly the opening fills of every open
-// position.
 func (w *Walker[T]) OpenFills() map[string][]T {
 	out := make(map[string][]T, len(w.pending)+len(w.opened))
 	for key, fills := range w.opened {

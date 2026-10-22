@@ -11,27 +11,11 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/reconstruction/fx"
 )
 
-func BuildOrders(orders []models.Order, positionID string, lotSizes map[string]float64, ledger []helpers.CashEntry) []domain.FXOrder {
+func BuildOrders(orders []models.Order, positionID string, lotSizes map[string]float64) []domain.FXOrder {
 	tp, sl := Protection(orders, time.Time{})
-	cashByOrder := helpers.ByOrder(ledger)
-	var opens []helpers.Fill
-	for _, o := range orders {
-		if !o.Closing() {
-			opens = append(opens, helpers.Fills(o)...)
-		}
-	}
 	out := make([]domain.FXOrder, 0, len(orders))
 	for _, o := range orders {
 		order := BuildOrder(o, positionID, lotSizes)
-		if o.Closing() && len(order.Trade.OrderID) > 0 {
-			cash, ok := cashByOrder[order.ID]
-			if ok {
-				order.Trade.Profit = fx.Round8(cash.Settlement)
-				order.Trade.Commission = fx.Round8(math.Abs(cash.Commission))
-			} else if order.Trade.Profit == 0 && len(opens) > 0 {
-				order.Trade.Profit = priceProfit(o, helpers.Fills(o), opens)
-			}
-		}
 		switch {
 		case !o.Closing():
 			order.TP, order.SL = tp, sl
@@ -45,19 +29,6 @@ func BuildOrders(orders []models.Order, positionID string, lotSizes map[string]f
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].UpdatedAt.Before(out[j].UpdatedAt) })
 	return out
-}
-
-func priceProfit(o models.Order, closes, opens []helpers.Fill) float64 {
-	sign := 1.0
-	if fx.PositionSide(o.OrderSide()) == fx.Long {
-		sign = -1
-	}
-	entry := helpers.VWAP(opens)
-	var pnl float64
-	for _, f := range closes {
-		pnl += sign * (f.Price - entry) * f.Quantity
-	}
-	return fx.Round8(pnl)
 }
 
 func BuildOrder(o models.Order, positionID string, lotSizes map[string]float64) domain.FXOrder {

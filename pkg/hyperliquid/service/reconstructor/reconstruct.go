@@ -163,15 +163,8 @@ func CollectEpisodes(
 	return walk, nil
 }
 
-// earlierFillsWindow is the span of one backwards fills request before the
-// cutoff; positions rarely straddle it by more than a few windows.
 const earlierFillsWindow = 30 * 24 * time.Hour
 
-// walkEarlier fetches fills older than endMs in windows, newest first, only
-// while some position is still half walked (an episode that closed inside
-// the cutoff window but opened before it). Every fill carries its
-// startPosition, so the walker seeds itself and Flat() is exact. Returns the
-// fetched fills oldest first and the closed episodes found.
 func walkEarlier(
 	fetch func(startMs, endMs int64) ([]models.RawFill, error),
 	segmenter *helpers.FillSegmenter,
@@ -197,8 +190,6 @@ func walkEarlier(
 	return earlier, segments, nil
 }
 
-// renumberSyntheticTids keeps the synthetic (negative) tids that
-// NormalizeFills assigns from -1 on every call unique across batches.
 func renumberSyntheticTids(fills []models.RawFill, next *int64) []models.RawFill {
 	for i := range fills {
 		if fills[i].Tid < 0 {
@@ -253,7 +244,6 @@ func FindClosedPosition(
 	pair = helpers.NormalizeContractName(pair)
 	coin := helpers.CoinFromPair(pair)
 
-	// The position opened at openedAt, so nothing before it is needed.
 	sinceMs := openedAt.UnixMilli()
 	allFills, err := executors.FetchFillsRange(client, endpoint, user, sinceMs, time.Now().UnixMilli())
 	if err != nil {

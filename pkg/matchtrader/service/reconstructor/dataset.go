@@ -33,6 +33,9 @@ type Dataset struct {
 	finance   []models.FinanceOperation
 	financeOK bool
 
+	instrumentsMu sync.Mutex
+	instruments   helpers.Instruments
+
 	once      sync.Once
 	positions []domain.FXPosition
 	events    []fx.BalanceEvent
@@ -55,6 +58,7 @@ func Load(ctx context.Context, client *connector.Client, days int, s scope.Scope
 		func() (err error) { d.balance, err = executors.FetchBalance(ctx, client); return },
 		when(history, func() (err error) { d.open, err = executors.FetchOpenPositions(ctx, client); return }),
 		when(s.Has(scope.Open), func() (err error) { d.pending, err = executors.FetchActiveOrders(ctx, client); return }),
+		when(history, func() error { _, _ = d.loadInstruments(); return nil }),
 	)
 	if err != nil {
 		return nil, err
@@ -74,6 +78,26 @@ func Load(ctx context.Context, client *connector.Client, days int, s scope.Scope
 		return nil, err
 	}
 	return d, nil
+}
+
+func (d *Dataset) loadInstruments() (helpers.Instruments, error) {
+	d.instrumentsMu.Lock()
+	defer d.instrumentsMu.Unlock()
+	if d.instruments != nil {
+		return d.instruments, nil
+	}
+	list, err := executors.FetchInstruments(d.ctx, d.client)
+	if err != nil {
+		return nil, err
+	}
+	d.instruments = helpers.IndexInstruments(list)
+	return d.instruments, nil
+}
+
+func (d *Dataset) knownInstruments() helpers.Instruments {
+	d.instrumentsMu.Lock()
+	defer d.instrumentsMu.Unlock()
+	return d.instruments
 }
 
 func when(ok bool, fn func() error) func() error {
@@ -106,6 +130,7 @@ func (d *Dataset) build() {
 			openIDs[p.ID] = true
 		}
 		d.positions = builders.BuildPositions(d.closed, openIDs, helpers.Leverage(d.session))
+		helpers.AttachContractSizes(d.positions, d.knownInstruments())
 
 		d.events = builders.BalanceEvents(d.closed, d.finance)
 		if !d.financeOK {
@@ -129,6 +154,7 @@ func (d *Dataset) ClosedPositions() []domain.FXPosition {
 
 func (d *Dataset) OpenPositions() []domain.FXOpenPosition {
 	open := builders.BuildOpenPositions(d.open, d.closed)
+	helpers.AttachOpenContractSizes(open, d.knownInstruments())
 	fx.EnrichOpenMAEMFE(open, d.now, helpers.BarFetcher(d.ctx, d.client), candleWorkers)
 	return open
 }
@@ -169,4 +195,12 @@ func (d *Dataset) Transactions() []domain.Transaction {
 		}
 	}
 	return kept
+}
+
+func (d *Dataset) ContractSizes() ([]domain.FXSymbolSpec, error) {
+	in, err := d.loadInstruments()
+	if err != nil {
+		return nil, err
+	}
+	return helpers.SymbolSpecs(in, d.open, d.closed), nil
 }

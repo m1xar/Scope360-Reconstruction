@@ -95,7 +95,7 @@ func Load(ctx context.Context, client *connector.Client, days int, s scope.Scope
 			d.history = helpers.MergeOrders(orders, openers)
 			return nil
 		}),
-		when(s.Any(scope.Closed|scope.Open|scope.Balances|scope.Transactions), func() (err error) {
+		when(s.Any(scope.Closed|scope.Balances|scope.Transactions), func() (err error) {
 			d.transfers, err = executors.FetchTransfers(ctx, client, from)
 			return
 		}),
@@ -202,6 +202,10 @@ func (d *Dataset) AccountInfo() domain.FXAccountInfo {
 		info.FreeMargin = d.metrics.MarginFree.Float()
 	}
 	return info
+}
+
+func (d *Dataset) ContractSizes() ([]domain.FXSymbolSpec, error) {
+	return helpers.SymbolSpecs(d.lotSizes, d.positions, d.orders), nil
 }
 
 func (d *Dataset) Transactions() []domain.Transaction {

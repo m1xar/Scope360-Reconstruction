@@ -37,12 +37,10 @@ func (e *HTTPError) GetStatusCode() int {
 	return e.StatusCode
 }
 
-// NewBaseClient returns a resty client with 429/5xx retries (same idea as OKX).
 func NewBaseClient() *resty.Client {
 	return ConfigureRetries(resty.New())
 }
 
-// ConfigureRetries attaches 429/5xx retry policy to an existing client.
 func ConfigureRetries(client *resty.Client) *resty.Client {
 	if client == nil {
 		client = resty.New()

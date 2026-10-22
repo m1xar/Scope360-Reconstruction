@@ -18,4 +18,5 @@ type FXOpenPosition struct {
 	MFE           *float64
 	OpenTime      time.Time
 	Orders        []FXOrder
+	ContractSize  *float64
 }

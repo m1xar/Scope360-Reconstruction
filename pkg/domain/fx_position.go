@@ -32,4 +32,5 @@ type FXPosition struct {
 	ClosedAt         *time.Time
 	Orders           []FXOrder
 	BalanceInit      float64
+	ContractSize     *float64
 }

@@ -95,9 +95,6 @@ func CollectWeeks(
 	}
 
 	for i := 0; i < len(windows); {
-		// Weeks inside the cutoff window are all needed and fetched in
-		// parallel chunks; past the cutoff the walk may stop after any
-		// week, so fetch one at a time instead of overshooting by a chunk.
 		chunk := weekChunk
 		if cutoff != nil && windows[i].EndMs < cutoffMs {
 			chunk = 1

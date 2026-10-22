@@ -5,13 +5,11 @@ import (
 )
 
 type CandleRequest struct {
-	Coin     string
-	Interval string
-	StartMs  int64
-	EndMs    int64
-	ReplyCh  chan<- CandleResponse
-	// KeepPartialBars disables dropping bars that straddle StartMs/EndMs
-	// (needed when the caller wants the latest, still-open bar).
+	Coin            string
+	Interval        string
+	StartMs         int64
+	EndMs           int64
+	ReplyCh         chan<- CandleResponse
 	KeepPartialBars bool
 }
 

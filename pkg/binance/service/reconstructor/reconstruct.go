@@ -152,15 +152,11 @@ func forEachSymbol[T any](symbols []string, fn func(symbol string) ([]T, error))
 	return all, nil
 }
 
-// symbolWalk is the result of walking one symbol's trades newest first.
 type symbolWalk struct {
-	groups    [][]models.Trade // closed episodes, each oldest first
-	openFills []models.Trade   // fills of the still-open positions
+	groups    [][]models.Trade
+	openFills []models.Trade
 }
 
-// walkSymbolFills walks a symbol's trades backwards in 7-day windows down to
-// floorMs (the symbol's first trade). With a cutoff it stops once the window
-// is past it and no episode is left half walked, so positions that straddle
 func walkSymbolFills(
 	fetch func(startMs, endMs int64) ([]models.Trade, error),
 	symbol string,
@@ -219,8 +215,6 @@ func collectWalks(
 ) ([]symbolWalk, error) {
 	return forEachSymbol(symbols, func(symbol string) ([]symbolWalk, error) {
 		if cutoff == nil && !untilResolved {
-			// Full history: one forward pass by id is far cheaper than a
-			// backwards walk over every week of retention.
 			fills, err := executors.FetchAllUserTrades(client, symbol)
 			if err != nil {
 				return nil, err
@@ -228,8 +222,6 @@ func collectWalks(
 			seg := helpers.NewFillSegmenter(ownPositions(openPositions, symbol))
 			return []symbolWalk{{groups: seg.PushOlderBatch(fills), openFills: seg.OpenFills()}}, nil
 		}
-		// The oldest trade bounds the walk: a symbol whose history has a gap
-		// (or none at all) would otherwise be walked to the retention floor.
 		first, err := executors.FirstUserTrade(client, symbol)
 		if err != nil {
 			return nil, err
@@ -237,8 +229,6 @@ func collectWalks(
 		if first == nil {
 			return []symbolWalk{{}}, nil
 		}
-		// window.Backward covers (floor, end], so the floor sits just before
-		// the first trade.
 		walk, err := walkSymbolFills(func(startMs, endMs int64) ([]models.Trade, error) {
 			return executors.FetchUserTradesWindow(client, symbol, startMs, endMs)
 		}, symbol, openPositions, cutoff, untilResolved, first.Time-1)
@@ -249,9 +239,6 @@ func collectWalks(
 	})
 }
 
-// normalizeGroupFees converts non-stable commissions of every fill in groups
-// in one pass (the converter caches klines across symbols). Trade ids are
-// only unique per symbol, so fills are written back by (symbol, id).
 func normalizeGroupFees(client *resty.Client, groups [][]models.Trade) {
 	flat := groupFills(groups)
 	helpers.NormalizeFees(client, flat)
