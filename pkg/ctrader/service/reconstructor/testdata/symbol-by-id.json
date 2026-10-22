@@ -1,5 +1,0 @@
-{"ctidTraderAccountId": "42", "symbol": [
-  {"symbolId": "1", "digits": 5, "pipPosition": 4, "lotSize": "10000000", "minVolume": "100000", "maxVolume": "10000000000", "stepVolume": "100000"},
-  {"symbolId": "2", "digits": 2, "pipPosition": 2, "lotSize": "10000"},
-  {"symbolId": "3", "digits": 1, "pipPosition": 0}
-]}

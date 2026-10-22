@@ -8,15 +8,8 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/models"
 )
 
-// boundarySlackMs tolerates OKX stamping a position's cTime/uTime a few ms off
-// its first/last fill ts (seen: the closing fill 1ms after uTime). Only fills
-// that open (before FromMs) or close (after ToMs) the position are admitted in
-// the slack, so neighbouring positions on the same side are not picked up.
 const boundarySlackMs = 1000
 
-// PositionScope identifies the fills that belong to one position: OKX sets a
-// position's cTime and uTime to the ts of its first and last fill. ToMs <= 0
-// means the position is still open.
 type PositionScope struct {
 	InstId  string
 	PosSide string
@@ -41,9 +34,6 @@ func OrdersByID(orders []models.Order) map[string]models.Order {
 	return idx
 }
 
-// OrdersFromFills rebuilds a position's orders from its fills, so an order
-// whose fills are split between two positions contributes to each only the
-// part it filled there. Sizes are returned in base-asset units.
 func OrdersFromFills(
 	fills []models.Fill,
 	parents map[string]models.Order,

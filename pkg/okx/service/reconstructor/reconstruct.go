@@ -17,9 +17,6 @@ import (
 
 const defaultCandleWorkers = 4
 
-// orders-history-archive filters begin/end by order cTime, and a resting limit
-// order is created before the position it opens, so the fetch window has to
-// start earlier than the position's cTime.
 const openPositionOrdersLookback = 7 * 24 * 60 * 60 * 1000
 
 func ReconstructClosedPositions(
@@ -194,10 +191,6 @@ func enrichOpenPositionOrders(
 	}
 }
 
-// fetchOrdersAndFills loads order history (by order cTime, from ordersFromMs)
-// and fill history (by fill ts, from fillsFromMs) in parallel. Orders are
-// required; a fills failure is returned separately so callers can fall back
-// to whole-order matching.
 func fetchOrdersAndFills(
 	client *resty.Client,
 	baseURL string,

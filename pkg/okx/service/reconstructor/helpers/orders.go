@@ -41,7 +41,6 @@ func MatchOrdersToPosition(cp models.ClosedPosition, ordersByInst map[string][]m
 	return matched
 }
 
-// OrderInBaseUnits converts the order's contract sizes into base-asset units.
 func OrderInBaseUnits(ord models.Order, instrument models.Instrument) models.Order {
 	ctVal := MustFloat(instrument.CtVal)
 	ord.Sz = fmt.Sprint(MustFloat(ord.Sz) * ctVal)

@@ -15,9 +15,6 @@ type fundingKey struct {
 	usdc string
 }
 
-// FetchAllFunding pages userFunding from startTime to now. The endpoint caps
-// a response, so pages advance by the newest time seen until nothing new
-// comes back.
 func FetchAllFunding(
 	client *resty.Client,
 	endpoint string,

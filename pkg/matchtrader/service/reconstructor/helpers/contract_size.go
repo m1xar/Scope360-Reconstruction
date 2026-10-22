@@ -8,8 +8,6 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/matchtrader/connector/matchtrader/models"
 )
 
-// ContractSize returns Instrument.contractSize of the symbol (base-asset units
-// per lot), or nil when the instrument is unknown or reports no positive size.
 func (in Instruments) ContractSize(symbol string) *float64 {
 	inst, ok := in[symbol]
 	if !ok {
@@ -22,22 +20,18 @@ func (in Instruments) ContractSize(symbol string) *float64 {
 	return &v
 }
 
-// AttachContractSizes sets ContractSize on closed positions by broker symbol.
 func AttachContractSizes(positions []domain.FXPosition, in Instruments) {
 	for i := range positions {
 		positions[i].ContractSize = in.ContractSize(positions[i].Symbol)
 	}
 }
 
-// AttachOpenContractSizes sets ContractSize on open positions by broker symbol.
 func AttachOpenContractSizes(positions []domain.FXOpenPosition, in Instruments) {
 	for i := range positions {
 		positions[i].ContractSize = in.ContractSize(positions[i].Symbol)
 	}
 }
 
-// SymbolSpecs lists every instrument of the account plus traded symbols the
-// instrument list does not know (ContractSize nil), sorted by symbol.
 func SymbolSpecs(in Instruments, open []models.OpenPosition, closed []models.ClosedPosition) []domain.FXSymbolSpec {
 	aliases := make(map[string]string, len(in))
 	for symbol, inst := range in {

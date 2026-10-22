@@ -159,9 +159,6 @@ func BuildOrders(orders []models.Order, posID uuid.UUID) []domain.Order {
 	return result
 }
 
-// openedAmount is the total size of the position's opening orders (in base
-// units), so it matches the orders it is built from; openMaxPos is only the
-// peak exposure. The peak is kept as a floor in case orders are missing.
 func openedAmount(cp models.ClosedPosition, orders []models.Order, instrument models.Instrument) float64 {
 	peak := MustFloat(cp.OpenMaxPos) * MustFloat(instrument.CtVal)
 	openSide := "buy"
@@ -244,8 +241,6 @@ func buildSyntheticOrders(cp models.ClosedPosition, amount float64, posID uuid.U
 	}
 }
 
-// ApplyMAEMFE sets MAE/MFE from the high/low of the bars inside the position;
-// high/low are nil when no bar lies fully inside it.
 func ApplyMAEMFE(pos *domain.Position, high, low *float64) {
 	entry := pos.EntryPrice
 	exit := pos.ExitPrice

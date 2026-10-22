@@ -10,16 +10,11 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/kraken/service/reconstructor/helpers"
 )
 
-// IsOpeningEvent reports whether the update started the current position:
-// from flat, or by flipping through zero.
 func IsOpeningEvent(upd models.PositionUpdate) bool {
 	old, cur := upd.OldPosition.Float64(), upd.NewPosition.Float64()
 	return (old == 0 && cur != 0) || old*cur < 0
 }
 
-// BuildOpenOrdersFromEvents turns the execution events of an open position
-// (oldest first, starting with its opening event) into orders. Unlike fills
-// the events include liquidations and ADL, so they add up to the live size.
 func BuildOpenOrdersFromEvents(events []models.PositionUpdate, positionID uuid.UUID) []domain.Order {
 	out := make([]domain.Order, 0, len(events))
 	for i, upd := range events {
@@ -30,7 +25,6 @@ func BuildOpenOrdersFromEvents(events []models.PositionUpdate, positionID uuid.U
 		}
 		amount := math.Abs(change)
 		if i == 0 && old*cur < 0 {
-			// A flip: only the part past zero belongs to this position.
 			amount = math.Abs(cur)
 		}
 
@@ -72,8 +66,6 @@ func BuildOpenOrdersFromEvents(events []models.PositionUpdate, positionID uuid.U
 	return out
 }
 
-// EventTime is when the update happened: the fill time, or the event's own
-// timestamp for updates that are not executions.
 func EventTime(upd models.PositionUpdate) time.Time {
 	ms := upd.FillTime
 	if ms == 0 {

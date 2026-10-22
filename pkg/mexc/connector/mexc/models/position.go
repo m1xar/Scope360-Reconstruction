@@ -3,8 +3,8 @@ package models
 type HistoryPosition struct {
 	PositionId     int64   `json:"positionId"`
 	Symbol         string  `json:"symbol"`
-	PositionType   int     `json:"positionType"` // 1=long, 2=short
-	OpenType       int     `json:"openType"`     // 1=isolated, 2=cross
+	PositionType   int     `json:"positionType"`
+	OpenType       int     `json:"openType"`
 	State          int     `json:"state"`
 	HoldVol        float64 `json:"holdVol"`
 	FrozenVol      float64 `json:"frozenVol"`

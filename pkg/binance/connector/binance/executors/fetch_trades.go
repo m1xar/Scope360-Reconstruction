@@ -14,12 +14,8 @@ const userTradesPath = "/fapi/v1/userTrades"
 
 const tradesPageLimit = 1000
 
-// TradesWindowMax is the widest startTime/endTime span userTrades accepts.
 const TradesWindowMax = 7 * 24 * time.Hour
 
-// FetchUserTradesWindow returns the trades of symbol with startMs <= time <=
-// endMs (a span of at most TradesWindowMax), oldest first. fromId cannot be
-// combined with a time range, so pages advance by startTime.
 func FetchUserTradesWindow(client *resty.Client, symbol string, startMs, endMs int64) ([]models.Trade, error) {
 	var result []models.Trade
 	seen := make(map[int64]struct{})
@@ -75,9 +71,6 @@ func FetchUserTradesWindow(client *resty.Client, symbol string, startMs, endMs i
 	return result, nil
 }
 
-// FirstUserTrade returns the symbol's oldest trade (one request from id 0),
-// or nil when Binance has no trade history for it. Its time is the floor
-// for a backwards walk: nothing older can exist.
 func FirstUserTrade(client *resty.Client, symbol string) (*models.Trade, error) {
 	page, err := doWithRateLimit(func() ([]models.Trade, error) {
 		return binance.DoGet[[]models.Trade](client, userTradesPath, map[string]string{
@@ -93,9 +86,6 @@ func FirstUserTrade(client *resty.Client, symbol string) (*models.Trade, error) 
 	return &page[0], nil
 }
 
-// FetchAllUserTrades walks a symbol's entire trade history forward by id
-// (one request per 1000 trades). Used for a full-history sync, where the
-// windowed backwards walk would cost a request per week of retention.
 func FetchAllUserTrades(client *resty.Client, symbol string) ([]models.Trade, error) {
 	var result []models.Trade
 	seen := make(map[int64]struct{})

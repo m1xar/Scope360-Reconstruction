@@ -58,7 +58,6 @@ func Load(ctx context.Context, client *connector.Client, days int, s scope.Scope
 		func() (err error) { d.balance, err = executors.FetchBalance(ctx, client); return },
 		when(history, func() (err error) { d.open, err = executors.FetchOpenPositions(ctx, client); return }),
 		when(s.Has(scope.Open), func() (err error) { d.pending, err = executors.FetchActiveOrders(ctx, client); return }),
-		// Contract sizes only; a failure leaves ContractSize nil and must not fail the sync.
 		when(history, func() error { _, _ = d.loadInstruments(); return nil }),
 	)
 	if err != nil {
@@ -81,9 +80,6 @@ func Load(ctx context.Context, client *connector.Client, days int, s scope.Scope
 	return d, nil
 }
 
-// loadInstruments fetches effective-instruments once per Dataset (the client
-// caches the response too). A failed fetch is not remembered, so a later call
-// retries.
 func (d *Dataset) loadInstruments() (helpers.Instruments, error) {
 	d.instrumentsMu.Lock()
 	defer d.instrumentsMu.Unlock()
@@ -98,7 +94,6 @@ func (d *Dataset) loadInstruments() (helpers.Instruments, error) {
 	return d.instruments, nil
 }
 
-// knownInstruments returns what Load managed to fetch, without a new request.
 func (d *Dataset) knownInstruments() helpers.Instruments {
 	d.instrumentsMu.Lock()
 	defer d.instrumentsMu.Unlock()
@@ -202,10 +197,6 @@ func (d *Dataset) Transactions() []domain.Transaction {
 	return kept
 }
 
-// ContractSizes returns the contract specification of every instrument of the
-// account (and of traded symbols missing from the instrument list, with nil
-// ContractSize). It fetches effective-instruments if Load did not (scope 0),
-// so it works without loading any history — intended for backfills.
 func (d *Dataset) ContractSizes() ([]domain.FXSymbolSpec, error) {
 	in, err := d.loadInstruments()
 	if err != nil {

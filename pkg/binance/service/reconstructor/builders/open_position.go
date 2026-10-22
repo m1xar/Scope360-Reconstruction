@@ -53,8 +53,6 @@ func buildOpenPosition(
 
 	orders := buildOrders(episode.Parts, helpers.OrdersForEpisode(episode, ordersByID), positionID)
 	if len(orders) == 0 {
-		// Binance serves no fills for this position (history gap): stand in
-		// a single opening order for the full size at the entry price.
 		orders = []domain.Order{syntheticOpenOrder(pos, side, openTime, positionID)}
 	}
 

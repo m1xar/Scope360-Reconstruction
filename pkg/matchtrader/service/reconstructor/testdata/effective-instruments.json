@@ -1,7 +1,0 @@
-{
-  "instruments": [
-    {"symbol": "EURUSD.r", "alias": "EURUSD", "type": "FOREX", "contractSize": 100000, "pricePrecision": 5, "volumePrecision": 2, "sizeOfOnePoint": 0.00001, "baseCurrency": "EUR", "quoteCurrency": "USD"},
-    {"symbol": "XAUUSD.r", "alias": "XAUUSD", "type": "CFD", "contractSize": "100", "pricePrecision": 2, "volumePrecision": 2, "sizeOfOnePoint": 0.01, "baseCurrency": "XAU", "quoteCurrency": "USD"},
-    {"symbol": "BROKEN", "alias": "", "type": "CFD", "contractSize": 0}
-  ]
-}

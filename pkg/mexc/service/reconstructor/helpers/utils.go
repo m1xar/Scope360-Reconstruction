@@ -14,7 +14,6 @@ func Round8(val float64) float64 {
 	return math.Round(val*1e8) / 1e8
 }
 
-// CandleOpenMs returns the candle open time in ms; the kline API reports seconds.
 func CandleOpenMs(c models.Candle) int64 {
 	if c.Time < 1e12 {
 		return c.Time * 1000
@@ -116,8 +115,6 @@ func IsStableCurrency(currency string) bool {
 	}
 }
 
-// ApplyMAEMFE sets MAE/MFE from the high/low of the bars inside the position;
-// high/low are nil when no bar lies fully inside it.
 func ApplyMAEMFE(pos *domain.Position, high, low *float64) {
 	entry := pos.EntryPrice
 	exit := pos.ExitPrice

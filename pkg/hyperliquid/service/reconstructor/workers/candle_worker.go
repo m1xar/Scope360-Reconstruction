@@ -61,7 +61,6 @@ func fetchCandles(
 	intervalMs, _ := helpers.IntervalToMs(interval)
 	oldestAllowedMs := time.Now().UnixMilli() - intervalMs*5000
 
-	// Recent enough for Hyperliquid candle API — stay on HL.
 	if startMs >= oldestAllowedMs {
 		return executors.FetchAllCandlesHyperliquid(
 			client,
@@ -73,7 +72,6 @@ func fetchCandles(
 		)
 	}
 
-	// Older than HL window: pull Binance for the old slice, HL for the recent slice.
 	var out []models.HyperliquidCandle
 
 	binanceEnd := endMs

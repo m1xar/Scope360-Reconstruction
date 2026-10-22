@@ -175,9 +175,6 @@ func GetCandles(
 	return helpers.Candles(fx.NormalizePair(name), interval, bars), nil
 }
 
-// GetContractSizes returns the contract size (base-asset units per lot) of
-// every symbol of the account without loading any history. Use it to backfill
-// FXPosition.ContractSize by Pair; nil ContractSize = not reported.
 func GetContractSizes(
 	client *connector.Client,
 	cfg connector.Config,

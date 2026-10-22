@@ -17,9 +17,6 @@ const positionsPageLimit = 100
 
 const positionsMaxAge = 90 * 24 * time.Hour
 
-// FetchAllClosedPositionsByInstType pages positions-history newest first and
-// stops at the first position closed before sinceMs (or before the API's
-// 90-day retention when sinceMs is 0).
 func FetchAllClosedPositionsByInstType(client *resty.Client, baseURL, instType string, sinceMs int64) ([]models.ClosedPosition, error) {
 	var result []models.ClosedPosition
 	after := ""

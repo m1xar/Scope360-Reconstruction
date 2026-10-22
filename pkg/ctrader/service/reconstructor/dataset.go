@@ -127,13 +127,8 @@ func (d *Dataset) loadSymbols() (helpers.Symbols, error) {
 	return helpers.NewSymbols(names, full), nil
 }
 
-// symbolChunk caps symbol ids per ProtoOASymbolByIdReq in ContractSizes.
 const symbolChunk = 100
 
-// ContractSizes returns the contract size (lotSize/100, base-asset units per
-// lot) of every symbol of the account. Load fetches full specs only for traded
-// symbols, so the first call fetches the rest by id in chunks; the result is
-// cached in the Dataset. Works with Load(..., 0) — intended for backfills.
 func (d *Dataset) ContractSizes() ([]domain.FXSymbolSpec, error) {
 	d.catalogMu.Lock()
 	defer d.catalogMu.Unlock()

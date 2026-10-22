@@ -9,8 +9,6 @@ import (
 
 const assetHistoryPageSize = 100
 
-// FetchAssetHistory returns deposits and withdrawals; startMs/endMs bound the
-// range (0 = unbounded).
 func FetchAssetHistory(client *orderly.Client, startMs, endMs int64) ([]models.OrderlyAssetHistory, error) {
 	params := make(map[string]string)
 	if startMs > 0 {

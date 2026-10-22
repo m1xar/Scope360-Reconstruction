@@ -9,7 +9,6 @@ type Candle struct {
 	Vol   float64 `json:"vol"`
 }
 
-// CandleColumnar is the raw columnar format returned by the MEXC kline API.
 type CandleColumnar struct {
 	Time  []int64   `json:"time"`
 	Open  []float64 `json:"open"`

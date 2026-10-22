@@ -1,4 +1,0 @@
-{"ctidTraderAccountId": "42", "position": [
-  {"positionId": "30", "tradeData": {"symbolId": "2", "volume": "5000", "tradeSide": "BUY", "openTimestamp": "1760020000000"},
-   "positionStatus": "POSITION_STATUS_OPEN", "swap": "0", "price": 4000, "commission": "-100", "moneyDigits": 2}
-]}

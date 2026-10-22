@@ -204,11 +204,6 @@ func (d *Dataset) AccountInfo() domain.FXAccountInfo {
 	return info
 }
 
-// ContractSizes returns lotSize (base-asset units per lot) of every
-// instrument from /instruments/query, plus traded symbols without one (nil).
-// Load always fetches the instrument list, so this makes no request; a 404 on
-// that list leaves every ContractSize nil. The error is always nil and exists
-// for parity with the other FX connectors.
 func (d *Dataset) ContractSizes() ([]domain.FXSymbolSpec, error) {
 	return helpers.SymbolSpecs(d.lotSizes, d.positions, d.orders), nil
 }

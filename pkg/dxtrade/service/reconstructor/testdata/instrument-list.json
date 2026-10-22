@@ -1,5 +1,0 @@
-{"instruments": [
-  {"symbol": "EURUSD", "type": "FOREX", "currency": "USD", "lotSize": 100000, "multiplier": 1},
-  {"symbol": "XAUUSD", "type": "CFD", "currency": "USD", "lotSize": "100", "multiplier": 1},
-  {"symbol": "US30", "type": "CFD", "currency": "USD", "lotSize": 0, "multiplier": 1}
-]}

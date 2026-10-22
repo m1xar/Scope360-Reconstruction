@@ -10,7 +10,6 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/models"
 )
 
-// fills-history covers the last 3 months; begin/end filter by fill ts.
 const fillsHistoryPath = "/api/v5/trade/fills-history"
 
 const fillsPageLimit = 100

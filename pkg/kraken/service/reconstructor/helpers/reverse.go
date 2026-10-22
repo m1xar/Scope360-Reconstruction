@@ -39,9 +39,6 @@ type FillSegmenter struct {
 	walker *reverse.Walker[models.Fill]
 }
 
-// NewFillSegmenter seeds the walker with the live open positions up front, so
-// Resolved() stays false until each of them has been walked back to zero,
-// even for a symbol that has not produced a fill yet.
 func NewFillSegmenter(openPositions []models.OpenPosition) *FillSegmenter {
 	return &FillSegmenter{walker: reverse.NewSeededWalker[models.Fill](SeedFromOpenPositions(openPositions))}
 }
@@ -68,14 +65,10 @@ func (s *FillSegmenter) Flat() bool {
 	return s.walker.Flat()
 }
 
-// Resolved reports whether every seeded open position has been walked back
-// to its opening fill.
 func (s *FillSegmenter) Resolved() bool {
 	return s.walker.Resolved()
 }
 
-// OpenFills returns, per symbol and oldest first, the fills that belong to
-// the seeded open positions.
 func (s *FillSegmenter) OpenFills() map[string][]models.Fill {
 	return s.walker.OpenFills()
 }

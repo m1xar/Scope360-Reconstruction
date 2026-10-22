@@ -36,7 +36,6 @@ func FetchCandles(client *resty.Client, baseURL, instID, bar string, startMs, en
 			"limit":  fmt.Sprintf("%d", candlesPageLimit),
 		}
 		if startMs > 0 {
-			// before is exclusive: step back 1ms so a bar opening exactly at startMs is returned.
 			params["before"] = fmt.Sprint(startMs - 1)
 		}
 
