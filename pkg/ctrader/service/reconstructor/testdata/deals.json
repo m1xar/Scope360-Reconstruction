@@ -1,0 +1,12 @@
+{"ctidTraderAccountId": "42", "hasMore": false, "deal": [
+  {"dealId": "1001", "orderId": "501", "positionId": "10", "volume": "15000000", "filledVolume": "15000000", "symbolId": "1",
+   "createTimestamp": "1760000000000", "executionTimestamp": "1760000000000", "executionPrice": 1.1, "tradeSide": "BUY", "dealStatus": "FILLED", "moneyDigits": 2},
+  {"dealId": "1002", "orderId": "502", "positionId": "10", "volume": "15000000", "filledVolume": "15000000", "symbolId": "1",
+   "createTimestamp": "1760003600000", "executionTimestamp": "1760003600000", "executionPrice": 1.102, "tradeSide": "SELL", "dealStatus": "FILLED", "moneyDigits": 2,
+   "closePositionDetail": {"entryPrice": 1.1, "grossProfit": "30000", "swap": "0", "commission": "-600", "balance": "1029400", "closedVolume": "15000000", "moneyDigits": 2}},
+  {"dealId": "2001", "orderId": "601", "positionId": "20", "volume": "200", "filledVolume": "200", "symbolId": "3",
+   "createTimestamp": "1760010000000", "executionTimestamp": "1760010000000", "executionPrice": 42000, "tradeSide": "SELL", "dealStatus": "FILLED", "moneyDigits": 2},
+  {"dealId": "2002", "orderId": "602", "positionId": "20", "volume": "200", "filledVolume": "200", "symbolId": "3",
+   "createTimestamp": "1760013600000", "executionTimestamp": "1760013600000", "executionPrice": 41950, "tradeSide": "BUY", "dealStatus": "FILLED", "moneyDigits": 2,
+   "closePositionDetail": {"entryPrice": 42000, "grossProfit": "10000", "swap": "0", "commission": "0", "balance": "1039400", "closedVolume": "200", "moneyDigits": 2}}
+]}

@@ -1,0 +1,5 @@
+{"ctidTraderAccountId": "42", "symbol": [
+  {"symbolId": "1", "symbolName": "EURUSD", "enabled": true},
+  {"symbolId": "2", "symbolName": "XAUUSD", "enabled": true},
+  {"symbolId": "3", "symbolName": "US 30", "enabled": true}
+]}

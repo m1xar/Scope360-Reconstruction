@@ -18,4 +18,7 @@ type FXOpenPosition struct {
 	MFE           *float64
 	OpenTime      time.Time
 	Orders        []FXOrder
+	// ContractSize: units of the base asset per lot, nil if the platform did
+	// not report it. See FXPosition.ContractSize.
+	ContractSize *float64
 }

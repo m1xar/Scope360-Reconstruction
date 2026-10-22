@@ -63,6 +63,7 @@ func BuildOpenPositions(
 			Margin:        fpl[code].Margin.Float(),
 			OpenTime:      p.OpenTime.Time,
 			Orders:        built,
+			ContractSize:  helpers.ContractSize(lotSizes, p.Symbol),
 		})
 	}
 	return out

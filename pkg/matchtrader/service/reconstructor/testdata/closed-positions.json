@@ -1,0 +1,5 @@
+[
+  {"id": "P1", "uid": "P1-a", "symbol": "EURUSD.r", "alias": "EURUSD", "side": "BUY", "volume": 0.5, "openTimeMillis": 1760000000000, "openPrice": 1.1000, "timeMillis": 1760003600000, "closePrice": 1.1010, "commission": -2, "swap": 0, "profit": 25, "closeReason": "CLOSE_REASON_USER"},
+  {"id": "P1", "uid": "P1-b", "symbol": "EURUSD.r", "alias": "EURUSD", "side": "BUY", "volume": 0.5, "openTimeMillis": 1760000000000, "openPrice": 1.1000, "timeMillis": 1760007200000, "closePrice": 1.1020, "commission": -2, "swap": 0, "profit": 50, "closeReason": "CLOSE_REASON_USER"},
+  {"id": "P2", "uid": "P2-a", "symbol": "US30", "alias": "US30", "side": "SELL", "volume": 2, "openTimeMillis": 1760010000000, "openPrice": 42000, "timeMillis": 1760013600000, "closePrice": 41950, "commission": 0, "swap": -1, "profit": 100, "closeReason": "CLOSE_REASON_TP"}
+]

@@ -32,4 +32,8 @@ type FXPosition struct {
 	ClosedAt         *time.Time
 	Orders           []FXOrder
 	BalanceInit      float64
+	// ContractSize is the number of base-asset units in one lot as reported by
+	// the platform (EURUSD usually 100000, XAUUSD 100). It is not money per
+	// point. nil means the platform did not report it for this symbol.
+	ContractSize *float64
 }

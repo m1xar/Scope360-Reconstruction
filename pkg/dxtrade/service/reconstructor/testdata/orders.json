@@ -1,0 +1,18 @@
+{"orders": [
+  {"orderId": "1", "orderCode": "o1", "version": 2, "type": "MARKET", "instrument": "EURUSD", "status": "COMPLETED", "finalStatus": true, "side": "BUY",
+   "legs": [{"instrument": "EURUSD", "positionEffect": "OPEN", "positionCode": "100", "side": "BUY", "quantity": 150000, "filledQuantity": 150000, "averagePrice": 1.1}],
+   "issueTime": "2026-10-01T10:00:00Z", "transactionTime": "2026-10-01T10:00:00Z",
+   "executions": [{"executionCode": "e1", "lastQuantity": 150000, "lastPrice": 1.1, "transactionTime": "2026-10-01T10:00:00Z"}]},
+  {"orderId": "2", "orderCode": "o2", "version": 2, "type": "MARKET", "instrument": "EURUSD", "status": "COMPLETED", "finalStatus": true, "side": "SELL",
+   "legs": [{"instrument": "EURUSD", "positionEffect": "CLOSE", "positionCode": "100", "side": "SELL", "quantity": 150000, "filledQuantity": 150000, "averagePrice": 1.102}],
+   "issueTime": "2026-10-01T12:00:00Z", "transactionTime": "2026-10-01T12:00:00Z",
+   "executions": [{"executionCode": "e2", "lastQuantity": 150000, "lastPrice": 1.102, "transactionTime": "2026-10-01T12:00:00Z"}]},
+  {"orderId": "3", "orderCode": "o3", "version": 2, "type": "MARKET", "instrument": "US30", "status": "COMPLETED", "finalStatus": true, "side": "SELL",
+   "legs": [{"instrument": "US30", "positionEffect": "OPEN", "positionCode": "200", "side": "SELL", "quantity": 2, "filledQuantity": 2, "averagePrice": 42000}],
+   "issueTime": "2026-10-02T10:00:00Z", "transactionTime": "2026-10-02T10:00:00Z",
+   "executions": [{"executionCode": "e3", "lastQuantity": 2, "lastPrice": 42000, "transactionTime": "2026-10-02T10:00:00Z"}]},
+  {"orderId": "4", "orderCode": "o4", "version": 2, "type": "MARKET", "instrument": "US30", "status": "COMPLETED", "finalStatus": true, "side": "BUY",
+   "legs": [{"instrument": "US30", "positionEffect": "CLOSE", "positionCode": "200", "side": "BUY", "quantity": 2, "filledQuantity": 2, "averagePrice": 41950}],
+   "issueTime": "2026-10-02T11:00:00Z", "transactionTime": "2026-10-02T11:00:00Z",
+   "executions": [{"executionCode": "e4", "lastQuantity": 2, "lastPrice": 41950, "transactionTime": "2026-10-02T11:00:00Z"}]}
+]}

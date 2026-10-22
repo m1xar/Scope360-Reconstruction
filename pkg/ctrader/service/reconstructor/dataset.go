@@ -30,6 +30,9 @@ type Dataset struct {
 	session *connector.Session
 	symbols helpers.Symbols
 
+	catalogMu sync.Mutex
+	catalog   []domain.FXSymbolSpec
+
 	deals  []*pb.ProtoOADeal
 	orders []*pb.ProtoOAOrder
 
@@ -122,6 +125,43 @@ func (d *Dataset) loadSymbols() (helpers.Symbols, error) {
 		return helpers.Symbols{}, err
 	}
 	return helpers.NewSymbols(names, full), nil
+}
+
+// symbolChunk caps symbol ids per ProtoOASymbolByIdReq in ContractSizes.
+const symbolChunk = 100
+
+// ContractSizes returns the contract size (lotSize/100, base-asset units per
+// lot) of every symbol of the account. Load fetches full specs only for traded
+// symbols, so the first call fetches the rest by id in chunks; the result is
+// cached in the Dataset. Works with Load(..., 0) — intended for backfills.
+func (d *Dataset) ContractSizes() ([]domain.FXSymbolSpec, error) {
+	d.catalogMu.Lock()
+	defer d.catalogMu.Unlock()
+	if d.catalog != nil {
+		return d.catalog, nil
+	}
+	ids := make([]int64, 0, len(d.symbols.Names))
+	for id := range d.symbols.Names {
+		if _, ok := d.symbols.LotSizes[id]; !ok {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	full := helpers.Symbols{Names: d.symbols.Names, LotSizes: make(map[int64]int64, len(d.symbols.Names))}
+	for id, lot := range d.symbols.LotSizes {
+		full.LotSizes[id] = lot
+	}
+	for start := 0; start < len(ids); start += symbolChunk {
+		batch, err := executors.FetchSymbols(d.ctx, d.client, ids[start:min(start+symbolChunk, len(ids))])
+		if err != nil {
+			return nil, err
+		}
+		for id, lot := range helpers.NewSymbols(nil, batch).LotSizes {
+			full.LotSizes[id] = lot
+		}
+	}
+	d.catalog = full.SymbolSpecs()
+	return d.catalog, nil
 }
 
 func (d *Dataset) openIDs() map[int64]bool {
