@@ -26,8 +26,6 @@ type SpotHolding struct {
 
 type PriceAt func(asset string, ts int64) (float64, bool)
 
-type CashAt func(ts int64) float64
-
 const (
 	OrderStatusSynthetic = "SYNTHETIC"
 	OrderStatusTransfer  = "TRANSFER"
