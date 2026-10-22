@@ -163,9 +163,9 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 		return closed, nil
 	}
 
-	entry := holding.AvgPx
+	entry := inv.avg()
 	if entry <= 0 {
-		entry = inv.avg()
+		entry = holding.AvgPx
 	}
 	id, _ := uuid.NewV7()
 	for i := range lotOrders {
