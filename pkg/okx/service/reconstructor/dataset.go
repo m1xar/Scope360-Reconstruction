@@ -204,10 +204,7 @@ func (d *Dataset) fetchBills(from int64) ([]models.Bill, error) {
 	if !d.scope.Any(scope.Closed | scope.Balances | scope.Transactions) {
 		billType = "8"
 	}
-	if d.scope.Has(scope.Transactions) {
-		return executors.FetchAllBills(d.client, d.baseURL, "", from, billType)
-	}
-	return executors.FetchAllSwapAndFuturesBills(d.client, d.baseURL, from, billType)
+	return executors.FetchAllBills(d.client, d.baseURL, "", from, billType)
 }
 
 func (d *Dataset) identifiers() map[string]models.Instrumentidentifier {
@@ -261,14 +258,10 @@ func (d *Dataset) swapFuturesBills() []models.Bill {
 
 func (d *Dataset) allSnapshots() []domain.UserBalanceSnapshot {
 	d.snapOnce.Do(func() {
-		if !d.balOK || !d.billsOK {
+		if !d.balOK || !d.billsOK || len(d.bills) == 0 {
 			return
 		}
-		bills := d.swapFuturesBills()
-		if len(bills) == 0 {
-			return
-		}
-		d.snapshots = builders.BuildBalanceSnapshotsFromBills(helpers.MustFloat(d.balance.TotalEq), bills)
+		d.snapshots = builders.BuildBalanceSnapshotsFromBills(helpers.WalletBalance(d.balance), d.bills)
 	})
 	return d.snapshots
 }
@@ -320,7 +313,7 @@ func (d *Dataset) BalanceSnapshots() []domain.UserBalanceSnapshot {
 }
 
 func (d *Dataset) CurrentBalance() float64 {
-	return helpers.MustFloat(d.balance.TotalEq)
+	return helpers.WalletBalance(d.balance)
 }
 
 func (d *Dataset) Transactions() []domain.Transaction {

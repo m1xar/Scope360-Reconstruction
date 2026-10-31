@@ -192,7 +192,7 @@ func (d *Dataset) BalanceSnapshots() []domain.UserBalanceSnapshot {
 }
 
 func (d *Dataset) CurrentBalance() float64 {
-	return helpers.Round8(executors.TotalEquity(d.wallet))
+	return helpers.Round8(executors.TotalWalletBalance(d.wallet))
 }
 
 func (d *Dataset) Transactions() []domain.Transaction {

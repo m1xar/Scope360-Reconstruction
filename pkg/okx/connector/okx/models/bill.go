@@ -1,18 +1,21 @@
 package models
 
 type Bill struct {
-	BillId   string `json:"billId"`
-	InstId   string `json:"instId"`
-	InstType string `json:"instType"`
-	Type     string `json:"type"`
-	SubType  string `json:"subType"`
-	BalChg   string `json:"balChg"`
-	Bal      string `json:"bal"`
-	Sz       string `json:"sz"`
-	Pnl      string `json:"pnl"`
-	Fee      string `json:"fee"`
-	Ccy      string `json:"ccy"`
-	Ts       string `json:"ts"`
-	From     string `json:"from"`
-	To       string `json:"to"`
+	BillId    string `json:"billId"`
+	InstId    string `json:"instId"`
+	InstType  string `json:"instType"`
+	Type      string `json:"type"`
+	SubType   string `json:"subType"`
+	BalChg    string `json:"balChg"`
+	Bal       string `json:"bal"`
+	MgnMode   string `json:"mgnMode"`
+	PosBal    string `json:"posBal"`
+	PosBalChg string `json:"posBalChg"`
+	Sz        string `json:"sz"`
+	Pnl       string `json:"pnl"`
+	Fee       string `json:"fee"`
+	Ccy       string `json:"ccy"`
+	Ts        string `json:"ts"`
+	From      string `json:"from"`
+	To        string `json:"to"`
 }
