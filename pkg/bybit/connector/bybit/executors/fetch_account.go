@@ -61,10 +61,6 @@ func parse(s string) float64 {
 	return v
 }
 
-func TotalEquity(w models.WalletAccount) float64 {
-	return parse(w.TotalEquity)
-}
-
 func TotalWalletBalance(w models.WalletAccount) float64 {
 	return parse(w.TotalWalletBalance)
 }

@@ -2,7 +2,6 @@ package executors
 
 import (
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -75,23 +74,4 @@ func FetchAllBills(client *resty.Client, baseURL, instType string, startMs int64
 	}
 
 	return result, nil
-}
-
-func FetchAllSwapAndFuturesBills(client *resty.Client, baseURL string, startMs int64, billType string) ([]models.Bill, error) {
-	var swapBills, futuresBills []models.Bill
-	var swapErr, futuresErr error
-	var wg sync.WaitGroup
-
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		swapBills, swapErr = FetchAllBills(client, baseURL, "SWAP", startMs, billType)
-	}()
-	go func() {
-		defer wg.Done()
-		futuresBills, futuresErr = FetchAllBills(client, baseURL, "FUTURES", startMs, billType)
-	}()
-	wg.Wait()
-
-	return mergeInstTypeResults(swapBills, swapErr, futuresBills, futuresErr)
 }

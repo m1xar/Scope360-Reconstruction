@@ -123,7 +123,7 @@ func GetCurrentBalance(
 		return nil, err
 	}
 
-	val := helpers.MustFloat(balance.TotalEq)
+	val := helpers.WalletBalance(balance)
 	return &val, nil
 }
 

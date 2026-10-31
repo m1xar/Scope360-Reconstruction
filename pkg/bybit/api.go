@@ -129,8 +129,8 @@ func GetCurrentBalance(
 		return nil, err
 	}
 
-	equity := helpers.Round8(executors.TotalEquity(wallet))
-	return &equity, nil
+	balance := helpers.Round8(executors.TotalWalletBalance(wallet))
+	return &balance, nil
 }
 
 func GetTransactions(
