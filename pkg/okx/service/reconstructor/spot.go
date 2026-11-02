@@ -187,6 +187,27 @@ func transferLegs(bills []models.Bill, pricer *usdPricer) []helpers.SpotLeg {
 	return legs
 }
 
+func spotMinSizes(instruments []models.Instrument) map[string]float64 {
+	out := map[string]float64{}
+	for _, inst := range instruments {
+		if inst.InstType != "" && inst.InstType != "SPOT" {
+			continue
+		}
+		size := helpers.MustFloat(inst.MinSz)
+		if size <= 0 {
+			continue
+		}
+		base := inst.BaseCcy
+		if base == "" {
+			base = strings.SplitN(inst.InstID, "-", 2)[0]
+		}
+		if cur, ok := out[base]; !ok || size < cur {
+			out[base] = size
+		}
+	}
+	return out
+}
+
 func spotHoldings(balance models.Balance) []helpers.SpotHolding {
 	out := make([]helpers.SpotHolding, 0, len(balance.Details))
 	for _, d := range balance.Details {

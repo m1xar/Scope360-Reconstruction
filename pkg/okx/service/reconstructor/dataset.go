@@ -33,9 +33,11 @@ type Dataset struct {
 	ordersOK bool
 	algos    []models.AlgoOrder
 
-	spotOrders []models.Order
-	spotOK     bool
-	spotBills  []models.Bill
+	spotOrders      []models.Order
+	spotOK          bool
+	spotBills       []models.Bill
+	spotInstruments []models.Instrument
+	spotHistoryMs   int64
 
 	bills   []models.Bill
 	billsOK bool
@@ -125,6 +127,14 @@ func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope
 				return err
 			}
 			d.spotBills = bills
+			return nil
+		}),
+		when(s.Has(scope.Spot), func() error {
+			instruments, err := executors.FetchInstrumentsByType(client, baseURL, "SPOT")
+			if err != nil {
+				return err
+			}
+			d.spotInstruments = instruments
 			return nil
 		}),
 		when(billsWanted, func() error {
@@ -286,17 +296,74 @@ func (d *Dataset) OpenPositions() ([]domain.OpenPosition, error) {
 	return positions, nil
 }
 
+// AddSpotHistory merges previously known spot orders and transfer bills into
+// the dataset so lots are rebuilt from the full known history, not only from
+// the fetch window. Fresh exchange records win over historical duplicates.
+func (d *Dataset) AddSpotHistory(orders []models.Order, bills []models.Bill) {
+	seen := make(map[string]bool, len(d.spotOrders))
+	for _, o := range d.spotOrders {
+		seen[o.OrdId] = true
+	}
+	for _, o := range orders {
+		if o.OrdId == "" || seen[o.OrdId] {
+			continue
+		}
+		seen[o.OrdId] = true
+		d.spotOrders = append(d.spotOrders, o)
+		d.extendSpotHistory(helpers.MustInt64(o.FillTime), helpers.MustInt64(o.UTime), helpers.MustInt64(o.CTime))
+	}
+	known := make(map[string]bool, len(d.spotBills)+len(d.bills))
+	for _, b := range d.spotBills {
+		known[b.BillId] = true
+	}
+	for _, b := range d.bills {
+		known[b.BillId] = true
+	}
+	for _, b := range bills {
+		if b.BillId == "" || known[b.BillId] {
+			continue
+		}
+		known[b.BillId] = true
+		d.spotBills = append(d.spotBills, b)
+		d.bills = append(d.bills, b)
+		d.extendSpotHistory(helpers.MustInt64(b.Ts))
+	}
+}
+
+func (d *Dataset) extendSpotHistory(timestamps ...int64) {
+	for _, ts := range timestamps {
+		if ts > 0 && (d.spotHistoryMs == 0 || ts < d.spotHistoryMs) {
+			d.spotHistoryMs = ts
+		}
+	}
+}
+
+// SpotWindowStart is the earliest instant covered by the spot reconstruction:
+// the fetch window or the oldest merged history record, whichever is earlier.
+func (d *Dataset) SpotWindowStart() time.Time {
+	start := d.windowMs
+	if d.spotHistoryMs > 0 && d.spotHistoryMs < start {
+		start = d.spotHistoryMs
+	}
+	return time.UnixMilli(start).UTC()
+}
+
+func (d *Dataset) SpotOrders() []models.Order { return d.spotOrders }
+
+func (d *Dataset) SpotBills() []models.Bill {
+	if d.scope.Has(scope.Transactions) && d.billsOK {
+		return d.bills
+	}
+	return d.spotBills
+}
+
 func (d *Dataset) SpotPositions() ([]domain.Position, []domain.OpenPosition, error) {
 	if !d.spotOK || !d.balOK {
 		return nil, nil, fmt.Errorf("okx: spot dataset not loaded")
 	}
 	pricer := newUSDPricer(d.client, d.baseURL)
-	bills := d.spotBills
-	if d.scope.Has(scope.Transactions) && d.billsOK {
-		bills = d.bills
-	}
-	legs := append(spotLegs(d.spotOrders, pricer), transferLegs(bills, pricer)...)
-	closed, open := builders.BuildSpotPositions(legs, spotHoldings(d.balance), time.UnixMilli(d.windowMs).UTC(), pricer.price)
+	legs := append(spotLegs(d.spotOrders, pricer), transferLegs(d.SpotBills(), pricer)...)
+	closed, open := builders.BuildSpotPositions(legs, spotHoldings(d.balance), d.SpotWindowStart(), pricer.price, spotMinSizes(d.spotInstruments))
 	applySpotExcursions(d.client, d.baseURL, closed)
 	return closed, open, nil
 }

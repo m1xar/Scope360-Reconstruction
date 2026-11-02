@@ -16,6 +16,7 @@ type OpenPosition struct {
 	EntryPrice   float64
 	CurrentPrice float64
 	Commission   float64
+	RealizedPnl  float64
 	OpenTime     time.Time
 	Orders       []Order
 	IsSpot       bool
