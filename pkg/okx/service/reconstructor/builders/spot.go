@@ -254,10 +254,10 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 func spotClosedPosition(asset string, lot spotLot) domain.Position {
 	id, _ := uuid.NewV7()
 	qty := lot.sellQty
-	entry := lot.buyCost / qty
+	pnl := lot.realized
+	entry := (lot.proceeds - pnl) / qty
 	exit := lot.proceeds / qty
 	fee := lot.buyFee + lot.sellFee
-	pnl := lot.proceeds - lot.buyCost
 	net := pnl - fee
 	closedAt := lot.lastSell
 
