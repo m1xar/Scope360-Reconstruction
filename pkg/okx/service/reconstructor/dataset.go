@@ -2,6 +2,7 @@ package reconstructor
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -33,11 +34,16 @@ type Dataset struct {
 	ordersOK bool
 	algos    []models.AlgoOrder
 
-	spotOrders      []models.Order
-	spotOK          bool
-	spotBills       []models.Bill
-	spotInstruments []models.Instrument
-	spotHistoryMs   int64
+	spotOrders          []models.Order
+	spotOK              bool
+	spotBills           []models.Bill
+	spotHistoryBills    []models.Bill
+	spotAdjustments     []helpers.SpotAdjustment
+	spotHistoryAdjust   []helpers.SpotAdjustment
+	spotBillsCursorMs   int64
+	spotHistoryCursorMs int64
+	spotInstruments     []models.Instrument
+	spotHistoryMs       int64
 
 	bills   []models.Bill
 	billsOK bool
@@ -119,14 +125,6 @@ func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope
 			if err == nil {
 				d.algos = algos
 			}
-			return nil
-		}),
-		when(s.Has(scope.Spot) && !s.Has(scope.Transactions), func() error {
-			bills, err := executors.FetchAllBills(client, baseURL, "", d.windowMs, "1")
-			if err != nil {
-				return err
-			}
-			d.spotBills = bills
 			return nil
 		}),
 		when(s.Has(scope.Spot), func() error {
@@ -296,10 +294,12 @@ func (d *Dataset) OpenPositions() ([]domain.OpenPosition, error) {
 	return positions, nil
 }
 
-// AddSpotHistory merges previously known spot orders and transfer bills into
-// the dataset so lots are rebuilt from the full known history, not only from
-// the fetch window. Fresh exchange records win over historical duplicates.
-func (d *Dataset) AddSpotHistory(orders []models.Order, bills []models.Bill) {
+// AddSpotHistory merges previously known spot orders, transfer bills and
+// balance adjustments into the dataset so lots are rebuilt from the full known
+// history, not only from the fetch window. Fresh exchange records win over
+// historical duplicates; billsCursor is the instant up to which bills were
+// already examined, so the next bill fetch starts from that day.
+func (d *Dataset) AddSpotHistory(orders []models.Order, bills []models.Bill, adjustments []helpers.SpotAdjustment, billsCursor time.Time) {
 	seen := make(map[string]bool, len(d.spotOrders))
 	for _, o := range d.spotOrders {
 		seen[o.OrdId] = true
@@ -312,22 +312,76 @@ func (d *Dataset) AddSpotHistory(orders []models.Order, bills []models.Bill) {
 		d.spotOrders = append(d.spotOrders, o)
 		d.extendSpotHistory(helpers.MustInt64(o.FillTime), helpers.MustInt64(o.UTime), helpers.MustInt64(o.CTime))
 	}
-	known := make(map[string]bool, len(d.spotBills)+len(d.bills))
-	for _, b := range d.spotBills {
-		known[b.BillId] = true
-	}
-	for _, b := range d.bills {
-		known[b.BillId] = true
-	}
 	for _, b := range bills {
-		if b.BillId == "" || known[b.BillId] {
+		if b.BillId == "" {
 			continue
 		}
-		known[b.BillId] = true
-		d.spotBills = append(d.spotBills, b)
-		d.bills = append(d.bills, b)
+		d.spotHistoryBills = append(d.spotHistoryBills, b)
 		d.extendSpotHistory(helpers.MustInt64(b.Ts))
 	}
+	d.spotHistoryAdjust = append(d.spotHistoryAdjust, adjustments...)
+	if !billsCursor.IsZero() {
+		d.spotHistoryCursorMs = billsCursor.UnixMilli()
+	}
+}
+
+// loadSpotBills fetches every bill since the later of the window start and the
+// day of the previous cursor, then derives transfers and balance adjustments.
+func (d *Dataset) loadSpotBills() error {
+	if d.spotBillsCursorMs > 0 {
+		return nil
+	}
+	from := d.windowMs
+	if d.spotHistoryCursorMs > 0 {
+		if dayStart := d.spotHistoryCursorMs - d.spotHistoryCursorMs%dayMs; dayStart > from {
+			from = dayStart
+		}
+	}
+	cursor := time.Now().UnixMilli()
+	var bills []models.Bill
+	if d.scope.Has(scope.Transactions) && d.billsOK {
+		for _, b := range d.bills {
+			if helpers.MustInt64(b.Ts) >= from {
+				bills = append(bills, b)
+			}
+		}
+	} else {
+		fetched, err := executors.FetchAllBills(d.client, d.baseURL, "", from, "")
+		if err != nil {
+			return err
+		}
+		bills = fetched
+	}
+	fresh := make(map[string]bool, len(bills))
+	for _, b := range bills {
+		fresh[b.BillId] = true
+	}
+	d.spotBills = bills
+	for _, b := range d.spotHistoryBills {
+		if !fresh[b.BillId] {
+			d.spotBills = append(d.spotBills, b)
+		}
+	}
+	adjustments := spotAdjustments(bills)
+	freshDays := make(map[string]bool, len(adjustments))
+	for _, adj := range adjustments {
+		freshDays[adj.Key()] = true
+	}
+	for _, adj := range d.spotHistoryAdjust {
+		if adj.Ts >= from || freshDays[adj.Key()] {
+			continue
+		}
+		adjustments = append(adjustments, adj)
+	}
+	sort.SliceStable(adjustments, func(i, j int) bool {
+		if adjustments[i].Ts != adjustments[j].Ts {
+			return adjustments[i].Ts < adjustments[j].Ts
+		}
+		return adjustments[i].Asset < adjustments[j].Asset
+	})
+	d.spotAdjustments = adjustments
+	d.spotBillsCursorMs = cursor
+	return nil
 }
 
 func (d *Dataset) extendSpotHistory(timestamps ...int64) {
@@ -350,20 +404,27 @@ func (d *Dataset) SpotWindowStart() time.Time {
 
 func (d *Dataset) SpotOrders() []models.Order { return d.spotOrders }
 
-func (d *Dataset) SpotBills() []models.Bill {
-	if d.scope.Has(scope.Transactions) && d.billsOK {
-		return d.bills
+func (d *Dataset) SpotBills() []models.Bill { return d.spotBills }
+
+func (d *Dataset) SpotAdjustments() []helpers.SpotAdjustment { return d.spotAdjustments }
+
+func (d *Dataset) SpotBillsCursor() time.Time {
+	if d.spotBillsCursorMs == 0 {
+		return time.Time{}
 	}
-	return d.spotBills
+	return time.UnixMilli(d.spotBillsCursorMs).UTC()
 }
 
 func (d *Dataset) SpotPositions() ([]domain.Position, []domain.OpenPosition, error) {
 	if !d.spotOK || !d.balOK {
 		return nil, nil, fmt.Errorf("okx: spot dataset not loaded")
 	}
+	if err := d.loadSpotBills(); err != nil {
+		return nil, nil, err
+	}
 	pricer := newUSDPricer(d.client, d.baseURL)
-	legs := append(spotLegs(d.spotOrders, pricer), transferLegs(d.SpotBills(), pricer)...)
-	closed, open := builders.BuildSpotPositions(legs, spotHoldings(d.balance), d.SpotWindowStart(), pricer.price, spotMinSizes(d.spotInstruments))
+	legs := append(spotLegs(d.spotOrders, pricer), transferLegs(d.spotBills, pricer)...)
+	closed, open := builders.BuildSpotPositions(legs, spotHoldings(d.balance), d.SpotWindowStart(), pricer.price, spotMinSizes(d.spotInstruments), d.spotAdjustments)
 	applySpotExcursions(d.client, d.baseURL, closed)
 	return closed, open, nil
 }

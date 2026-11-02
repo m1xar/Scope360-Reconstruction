@@ -1,5 +1,7 @@
 package helpers
 
+import "strconv"
+
 import "strings"
 
 type SpotLeg struct {
@@ -25,6 +27,19 @@ type SpotHolding struct {
 }
 
 type PriceAt func(asset string, ts int64) (float64, bool)
+
+// SpotAdjustment is the net quantity of an asset moved by activity that is not
+// a cash spot order or a transfer (option premiums, deliveries, conversions),
+// aggregated per UTC day; Ts is the start of that day in milliseconds.
+type SpotAdjustment struct {
+	Asset string
+	Qty   float64
+	Ts    int64
+}
+
+func (a SpotAdjustment) Key() string {
+	return a.Asset + "@" + strconv.FormatInt(a.Ts, 10)
+}
 
 const (
 	OrderStatusSynthetic = "SYNTHETIC"

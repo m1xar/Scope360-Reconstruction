@@ -78,8 +78,10 @@ func GetSpotPositions(
 // SpotHistory carries spot records the caller already persisted from earlier
 // syncs; they are merged with the fetch window before reconstruction.
 type SpotHistory struct {
-	Orders []models.Order
-	Bills  []models.Bill
+	Orders      []models.Order
+	Bills       []models.Bill
+	Adjustments []helpers.SpotAdjustment
+	BillsCursor time.Time
 }
 
 // SpotSnapshot is the reconstructed spot state plus the raw records it was
@@ -89,6 +91,8 @@ type SpotSnapshot struct {
 	Open        []domain.OpenPosition
 	Orders      []models.Order
 	Bills       []models.Bill
+	Adjustments []helpers.SpotAdjustment
+	BillsCursor time.Time
 	WindowStart time.Time
 }
 
@@ -103,7 +107,7 @@ func GetSpotSnapshot(
 	if err != nil {
 		return nil, err
 	}
-	d.AddSpotHistory(history.Orders, history.Bills)
+	d.AddSpotHistory(history.Orders, history.Bills, history.Adjustments, history.BillsCursor)
 	closed, open, err := d.SpotPositions()
 	if err != nil {
 		return nil, err
@@ -113,6 +117,8 @@ func GetSpotSnapshot(
 		Open:        open,
 		Orders:      d.SpotOrders(),
 		Bills:       d.SpotBills(),
+		Adjustments: d.SpotAdjustments(),
+		BillsCursor: d.SpotBillsCursor(),
 		WindowStart: d.SpotWindowStart(),
 	}, nil
 }

@@ -1,6 +1,7 @@
 package reconstructor
 
 import (
+	"sort"
 	"math"
 	"strconv"
 	"strings"
@@ -185,6 +186,47 @@ func transferLegs(bills []models.Bill, pricer *usdPricer) []helpers.SpotLeg {
 		})
 	}
 	return legs
+}
+
+const dayMs = int64(24 * 60 * 60 * 1000)
+
+// spotAdjustments aggregates per asset and UTC day every balance change that
+// is neither a cash spot fill nor a transfer, so option premiums, deliveries
+// and conversions explain the gap between spot fills and the live balance.
+func spotAdjustments(bills []models.Bill) []helpers.SpotAdjustment {
+	byKey := map[string]*helpers.SpotAdjustment{}
+	for _, b := range bills {
+		if b.Type == "1" || helpers.IsStableAsset(b.Ccy) || b.Ccy == "" {
+			continue
+		}
+		if b.Type == "2" && b.InstType == "SPOT" {
+			continue
+		}
+		chg := helpers.MustFloat(b.BalChg)
+		if chg == 0 {
+			continue
+		}
+		ts := helpers.MustInt64(b.Ts)
+		adj := helpers.SpotAdjustment{Asset: b.Ccy, Ts: ts - ts%dayMs}
+		key := adj.Key()
+		if cur, ok := byKey[key]; ok {
+			cur.Qty += chg
+			continue
+		}
+		adj.Qty = chg
+		byKey[key] = &adj
+	}
+	out := make([]helpers.SpotAdjustment, 0, len(byKey))
+	for _, adj := range byKey {
+		out = append(out, *adj)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Ts != out[j].Ts {
+			return out[i].Ts < out[j].Ts
+		}
+		return out[i].Asset < out[j].Asset
+	})
+	return out
 }
 
 func spotMinSizes(instruments []models.Instrument) map[string]float64 {

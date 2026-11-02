@@ -17,7 +17,7 @@ const spotDustUSD = 0.10
 // buy and sell as an execution and closes when the remaining quantity falls
 // below the instrument's minimum order size. A closed lot is a closed position
 // with volume-weighted entry/exit prices; the live lot is the open position.
-func BuildSpotPositions(legs []helpers.SpotLeg, holdings []helpers.SpotHolding, windowStart time.Time, priceAt helpers.PriceAt, minSizes map[string]float64) ([]domain.Position, []domain.OpenPosition) {
+func BuildSpotPositions(legs []helpers.SpotLeg, holdings []helpers.SpotHolding, windowStart time.Time, priceAt helpers.PriceAt, minSizes map[string]float64, adjustments []helpers.SpotAdjustment) ([]domain.Position, []domain.OpenPosition) {
 	byAsset := map[string][]helpers.SpotLeg{}
 	for _, leg := range legs {
 		if helpers.IsStableAsset(leg.Asset) {
@@ -25,11 +25,16 @@ func BuildSpotPositions(legs []helpers.SpotLeg, holdings []helpers.SpotHolding, 
 		}
 		byAsset[leg.Asset] = append(byAsset[leg.Asset], leg)
 	}
+	adjusted := map[string]float64{}
+	for _, adj := range adjustments {
+		adjusted[adj.Asset] += adj.Qty
+	}
 	held := map[string]helpers.SpotHolding{}
 	for _, h := range holdings {
 		if helpers.IsStableAsset(h.Asset) {
 			continue
 		}
+		h.Qty = math.Max(h.Qty-adjusted[h.Asset], 0)
 		held[h.Asset] = h
 		if _, ok := byAsset[h.Asset]; !ok && h.Qty*h.PriceUSD >= spotDustUSD {
 			byAsset[h.Asset] = nil
