@@ -211,9 +211,7 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 		inv.cost = avg * balance
 	}
 	if dust(balance) {
-		if inv.qty > eps {
-			closeLot()
-		}
+		closeLot()
 		return closed, nil
 	}
 	if inv.qty <= eps {
