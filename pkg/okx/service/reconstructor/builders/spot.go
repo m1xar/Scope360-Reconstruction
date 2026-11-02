@@ -121,19 +121,27 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 		}
 		return px
 	}
-	addSynthetic := func(qty float64) {
+	addSynthetic := func(qty float64, at time.Time) {
 		px := syntheticPrice(qty)
 		inv.qty += qty
 		inv.cost += qty * px
 		lot.buyQty += qty
 		lot.buyCost += qty * px
-		if !lot.synthetic {
-			lot.start = windowStart
-			lot.synthetic = true
+		lot.synthetic = true
+		if lot.start.IsZero() {
+			lot.start = at
 		}
-		entry := syntheticSpotOrder("BUY", qty, px, windowStart, 0)
+		entry := syntheticSpotOrder("BUY", qty, px, at, 0)
 		entry.Status = helpers.OrderStatusSynthetic
-		lot.orders = append([]domain.Order{entry}, lot.orders...)
+		lot.orders = append(lot.orders, entry)
+	}
+	openLot := func(at time.Time) {
+		if !lot.start.IsZero() {
+			return
+		}
+		lot.start = at
+		lot.buyQty += inv.qty
+		lot.buyCost += inv.cost
 	}
 	dust := func(qty float64) bool {
 		if qty <= eps {
@@ -148,19 +156,20 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 		if lot.sellQty > 0 {
 			closed = append(closed, spotClosedPosition(asset, lot))
 		}
-		inv = spotInventory{}
+		if inv.qty <= eps {
+			inv = spotInventory{}
+		}
 		lot = spotLot{}
 	}
 
 	if missing := balance - buyQty + sellQty; missing > eps {
-		addSynthetic(missing)
+		addSynthetic(missing, windowStart)
 	}
 
 	for _, leg := range legs {
+		at := time.UnixMilli(leg.Ts).UTC()
 		if leg.Side == "buy" {
-			if inv.qty <= eps && !lot.synthetic {
-				lot = spotLot{start: time.UnixMilli(leg.Ts).UTC()}
-			}
+			openLot(at)
 			if leg.Quote != "" {
 				lot.quote, lot.instId = leg.Quote, leg.InstId
 			}
@@ -173,8 +182,9 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 			lot.orders = append(lot.orders, spotOrderFromLeg(leg, 0))
 			continue
 		}
+		openLot(at)
 		if shortfall := leg.Qty - inv.qty; shortfall > eps {
-			addSynthetic(shortfall)
+			addSynthetic(shortfall, at)
 		}
 		if leg.Quote != "" {
 			lot.quote, lot.instId = leg.Quote, leg.InstId
@@ -188,7 +198,7 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 		lot.proceeds += leg.Qty * leg.PxUSD
 		lot.sellFee += fee
 		lot.realized += realized
-		lot.lastSell = time.UnixMilli(leg.Ts).UTC()
+		lot.lastSell = at
 		lot.orders = append(lot.orders, spotOrderFromLeg(leg, realized-fee))
 		if dust(inv.qty) {
 			closeLot()
@@ -208,8 +218,9 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 	}
 	if inv.qty <= eps {
 		lot = spotLot{}
-		addSynthetic(balance)
+		addSynthetic(balance, windowStart)
 	}
+	openLot(windowStart)
 
 	entry := inv.avg()
 	if entry <= 0 {
