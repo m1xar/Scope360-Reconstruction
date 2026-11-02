@@ -141,7 +141,7 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 		if inv.qty > 0 {
 			feeShare = inv.fee * leg.Qty / inv.qty
 		}
-		pos := spotClosedPosition(asset, leg, avg, helpers.SpotFeeUSD(leg)+feeShare, lotStart)
+		pos := spotClosedPosition(asset, leg, avg, helpers.SpotFeeUSD(leg), feeShare, lotStart)
 		if synthetic {
 			pos.Orders[0].Status = helpers.OrderStatusSynthetic
 		}
@@ -184,16 +184,18 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 		Side:         "LONG",
 		EntryPrice:   helpers.Round8(entry),
 		CurrentPrice: helpers.Round8(holding.PriceUSD),
+		Commission:   helpers.Round8(inv.fee),
 		OpenTime:     lotStart,
 		Orders:       lotOrders,
 		IsSpot:       true,
 	}
 }
 
-func spotClosedPosition(asset string, leg helpers.SpotLeg, entry, fee float64, openedAt time.Time) domain.Position {
+func spotClosedPosition(asset string, leg helpers.SpotLeg, entry, exitFee, basisFee float64, openedAt time.Time) domain.Position {
 	id, _ := uuid.NewV7()
 	qty := leg.Qty
 	exit := leg.PxUSD
+	fee := exitFee + basisFee
 	pnl := (exit - entry) * qty
 	net := pnl - fee
 	closedAt := time.UnixMilli(leg.Ts).UTC()
@@ -204,6 +206,7 @@ func spotClosedPosition(asset string, leg helpers.SpotLeg, entry, fee float64, o
 	}
 
 	orders := []domain.Order{syntheticSpotOrder("BUY", qty, entry, openedAt, 0), spotOrderFromLeg(leg, net)}
+	orders[0].Trade.Commission = helpers.Round8(basisFee)
 	for i := range orders {
 		orders[i].PositionID = id
 	}
