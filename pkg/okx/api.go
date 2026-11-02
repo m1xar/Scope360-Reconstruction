@@ -75,6 +75,48 @@ func GetSpotPositions(
 	return d.SpotPositions()
 }
 
+// SpotHistory carries spot records the caller already persisted from earlier
+// syncs; they are merged with the fetch window before reconstruction.
+type SpotHistory struct {
+	Orders []models.Order
+	Bills  []models.Bill
+}
+
+// SpotSnapshot is the reconstructed spot state plus the raw records it was
+// built from, so callers can persist them and feed them back next time.
+type SpotSnapshot struct {
+	Closed      []domain.Position
+	Open        []domain.OpenPosition
+	Orders      []models.Order
+	Bills       []models.Bill
+	WindowStart time.Time
+}
+
+func GetSpotSnapshot(
+	client *resty.Client,
+	creds okxclient.Credentials,
+	baseURL string,
+	days int,
+	history SpotHistory,
+) (*SpotSnapshot, error) {
+	d, err := load(client, creds, baseURL, days, scope.Spot)
+	if err != nil {
+		return nil, err
+	}
+	d.AddSpotHistory(history.Orders, history.Bills)
+	closed, open, err := d.SpotPositions()
+	if err != nil {
+		return nil, err
+	}
+	return &SpotSnapshot{
+		Closed:      closed,
+		Open:        open,
+		Orders:      d.SpotOrders(),
+		Bills:       d.SpotBills(),
+		WindowStart: d.SpotWindowStart(),
+	}, nil
+}
+
 func GetClosedPositionByExactMatch(
 	client *resty.Client,
 	creds okxclient.Credentials,
