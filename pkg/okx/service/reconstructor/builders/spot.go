@@ -10,7 +10,7 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/helpers"
 )
 
-const spotDustUSD = 1.0
+const spotDustUSD = 0.10
 
 // BuildSpotPositions reconstructs one lot per asset: the lot opens with the
 // first buy (or a synthetic basis when history starts mid-lot), absorbs every
