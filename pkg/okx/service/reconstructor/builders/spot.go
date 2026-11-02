@@ -10,7 +10,10 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/helpers"
 )
 
-const spotDustUSD = 0.10
+const (
+	spotDustUSD        = 0.10
+	spotSellBatchGapMs = int64(60 * 60 * 1000)
+)
 
 func BuildSpotPositions(legs []helpers.SpotLeg, holdings []helpers.SpotHolding, windowStart time.Time, priceAt helpers.PriceAt) ([]domain.Position, []domain.OpenPosition) {
 	byAsset := map[string][]helpers.SpotLeg{}
@@ -119,8 +122,43 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 		addSynthetic(missing)
 	}
 
+	var batch []helpers.SpotLeg
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		qty := 0.0
+		for _, leg := range batch {
+			qty += leg.Qty
+		}
+		if shortfall := qty - inv.qty; shortfall > eps {
+			addSynthetic(shortfall)
+		}
+		avg := inv.avg()
+		feeShare := 0.0
+		if inv.qty > 0 {
+			feeShare = inv.fee * qty / inv.qty
+		}
+		pos := spotClosedPosition(asset, batch, avg, feeShare, lotStart)
+		if synthetic {
+			pos.Orders[0].Status = helpers.OrderStatusSynthetic
+		}
+		closed = append(closed, pos)
+		inv.qty -= qty
+		inv.cost -= avg * qty
+		inv.fee -= feeShare
+		if inv.qty <= eps {
+			inv = spotInventory{}
+		}
+		for _, leg := range batch {
+			lotOrders = append(lotOrders, spotOrderFromLeg(leg, pos.NetPnl*leg.Qty/qty))
+		}
+		batch = nil
+	}
+
 	for _, leg := range legs {
 		if leg.Side == "buy" {
+			flush()
 			if inv.qty <= eps {
 				lotStart = time.UnixMilli(leg.Ts).UTC()
 				lotOrders = nil
@@ -132,28 +170,12 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 			lotOrders = append(lotOrders, spotOrderFromLeg(leg, 0))
 			continue
 		}
-
-		if shortfall := leg.Qty - inv.qty; shortfall > eps {
-			addSynthetic(shortfall)
+		if len(batch) > 0 && (leg.Transfer || batch[0].Transfer || leg.Ts-batch[len(batch)-1].Ts > spotSellBatchGapMs) {
+			flush()
 		}
-		avg := inv.avg()
-		feeShare := 0.0
-		if inv.qty > 0 {
-			feeShare = inv.fee * leg.Qty / inv.qty
-		}
-		pos := spotClosedPosition(asset, leg, avg, helpers.SpotFeeUSD(leg), feeShare, lotStart)
-		if synthetic {
-			pos.Orders[0].Status = helpers.OrderStatusSynthetic
-		}
-		closed = append(closed, pos)
-		inv.qty -= leg.Qty
-		inv.cost -= avg * leg.Qty
-		inv.fee -= feeShare
-		if inv.qty <= eps {
-			inv = spotInventory{}
-		}
-		lotOrders = append(lotOrders, spotOrderFromLeg(leg, pos.NetPnl))
+		batch = append(batch, leg)
 	}
+	flush()
 
 	if inv.qty-balance > eps {
 		avg := inv.avg()
@@ -191,22 +213,31 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 	}
 }
 
-func spotClosedPosition(asset string, leg helpers.SpotLeg, entry, exitFee, basisFee float64, openedAt time.Time) domain.Position {
+func spotClosedPosition(asset string, legs []helpers.SpotLeg, entry, basisFee float64, openedAt time.Time) domain.Position {
 	id, _ := uuid.NewV7()
-	qty := leg.Qty
-	exit := leg.PxUSD
+	var qty, exitCost, exitFee float64
+	for _, leg := range legs {
+		qty += leg.Qty
+		exitCost += leg.Qty * leg.PxUSD
+		exitFee += helpers.SpotFeeUSD(leg)
+	}
+	exit := exitCost / qty
 	fee := exitFee + basisFee
 	pnl := (exit - entry) * qty
 	net := pnl - fee
-	closedAt := time.UnixMilli(leg.Ts).UTC()
+	last := legs[len(legs)-1]
+	closedAt := time.UnixMilli(last.Ts).UTC()
 
 	status := "lose"
 	if net > 0 {
 		status = "win"
 	}
 
-	orders := []domain.Order{syntheticSpotOrder("BUY", qty, entry, openedAt, 0), spotOrderFromLeg(leg, net)}
+	orders := []domain.Order{syntheticSpotOrder("BUY", qty, entry, openedAt, 0)}
 	orders[0].Trade.Commission = helpers.Round8(basisFee)
+	for _, leg := range legs {
+		orders = append(orders, spotOrderFromLeg(leg, net*leg.Qty/qty))
+	}
 	for i := range orders {
 		orders[i].PositionID = id
 	}
@@ -214,8 +245,8 @@ func spotClosedPosition(asset string, leg helpers.SpotLeg, entry, exitFee, basis
 	return domain.Position{
 		ID:         id,
 		Side:       "LONG",
-		Pair:       asset + leg.Quote,
-		Symbol:     leg.InstId,
+		Pair:       asset + last.Quote,
+		Symbol:     last.InstId,
 		Amount:     helpers.Round8(qty),
 		EntryPrice: helpers.Round8(entry),
 		ExitPrice:  helpers.Round8(exit),
