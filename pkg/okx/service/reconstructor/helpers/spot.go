@@ -47,12 +47,24 @@ func (a SpotAdjustment) Key() string {
 
 const SpotDayMs = int64(24 * 60 * 60 * 1000)
 
+// SpotSyntheticKey is the exchange order id of a synthetic buy that covers
+// inventory the history does not explain: the asset and the instant in
+// milliseconds of the synthetic execution.
+func SpotSyntheticKey(asset string, ts int64) string {
+	return "synthetic:" + asset + "@" + strconv.FormatInt(ts, 10)
+}
+
 // SpotDayStart is the start of the UTC day of ts in milliseconds.
 func SpotDayStart(ts int64) int64 { return ts - ts%SpotDayMs }
 
+// Spot order statuses besides FILLED: SYNTHETIC is a buy that covers
+// unexplained inventory (exchange order id from SpotSyntheticKey), ADJUSTMENT
+// the replay of a SpotAdjustment (exchange order id from SpotAdjustment.Key)
+// and TRANSFER a funding transfer bill (exchange order id is the bill id).
 const (
-	OrderStatusSynthetic = "SYNTHETIC"
-	OrderStatusTransfer  = "TRANSFER"
+	OrderStatusSynthetic  = "SYNTHETIC"
+	OrderStatusAdjustment = "ADJUSTMENT"
+	OrderStatusTransfer   = "TRANSFER"
 )
 
 var stableAssets = map[string]bool{

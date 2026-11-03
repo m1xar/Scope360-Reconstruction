@@ -7,11 +7,9 @@ import (
 	"sync"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/executors"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/models"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/helpers"
-	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/workers"
 )
 
 type usdPricer struct {
@@ -257,46 +255,4 @@ func spotHoldings(balance models.Balance) []helpers.SpotHolding {
 		})
 	}
 	return out
-}
-
-func excursionMarket(symbol string) string {
-	parts := strings.SplitN(symbol, "-", 2)
-	if len(parts) == 2 && helpers.IsStableAsset(parts[1]) {
-		return symbol
-	}
-	return parts[0] + "-USDT"
-}
-
-func applySpotExcursions(client *resty.Client, baseURL string, positions []domain.Position) {
-	requests := make(chan helpers.CandleRequest, defaultCandleWorkers)
-	workers.StartCandleWorkers(client, baseURL, requests, defaultCandleWorkers)
-
-	type pending struct {
-		idx     int
-		replyCh chan helpers.CandleResponse
-	}
-	queue := make([]pending, 0, len(positions))
-	for i, pos := range positions {
-		if pos.CreatedAt.IsZero() || pos.ClosedAt == nil || !pos.ClosedAt.After(pos.CreatedAt) {
-			continue
-		}
-		replyCh := make(chan helpers.CandleResponse, 1)
-		requests <- helpers.CandleRequest{
-			InstId:  excursionMarket(pos.Symbol),
-			Bar:     "1m",
-			StartMs: pos.CreatedAt.UnixMilli(),
-			EndMs:   pos.ClosedAt.UnixMilli(),
-			ReplyCh: replyCh,
-		}
-		queue = append(queue, pending{idx: i, replyCh: replyCh})
-	}
-	close(requests)
-
-	for _, p := range queue {
-		resp := <-p.replyCh
-		if resp.Err == nil {
-			high, low := helpers.GetHighLow(resp.Candles)
-			helpers.ApplyMAEMFE(&positions[p.idx], high, low)
-		}
-	}
 }

@@ -2,6 +2,7 @@ package builders
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +11,12 @@ import (
 )
 
 var spotTestStart = time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+
+var spotTestNow = time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+
+func buildSpotTest(legs []helpers.SpotLeg, holdings []helpers.SpotHolding, windowStart time.Time, priceAt helpers.PriceAt, minSizes map[string]float64, adjustments []helpers.SpotAdjustment) ([]domain.Position, []domain.OpenPosition) {
+	return BuildSpotPositions(legs, holdings, windowStart, spotTestNow, priceAt, minSizes, adjustments)
+}
 
 func spotTestLeg(asset, side string, qty, px float64, day int) helpers.SpotLeg {
 	return helpers.SpotLeg{
@@ -44,7 +51,7 @@ func spotTestPrices(prices map[int]float64) helpers.PriceAt {
 func spotAdjustmentOrders(orders []domain.Order) []domain.Order {
 	var out []domain.Order
 	for _, order := range orders {
-		if order.Status == helpers.OrderStatusSynthetic && order.ExchangeOrderID != "" {
+		if order.Status == helpers.OrderStatusAdjustment {
 			out = append(out, order)
 		}
 	}
@@ -54,7 +61,7 @@ func spotAdjustmentOrders(orders []domain.Order) []domain.Order {
 func spotOpeningSynthetics(orders []domain.Order) int {
 	n := 0
 	for _, order := range orders {
-		if order.Status == helpers.OrderStatusSynthetic && order.ExchangeOrderID == "" {
+		if order.Status == helpers.OrderStatusSynthetic && strings.HasPrefix(order.ExchangeOrderID, "synthetic:") {
 			n++
 		}
 	}
@@ -67,7 +74,7 @@ func TestSpotNegativeAdjustmentIsSyntheticSellOnItsDay(t *testing.T) {
 	adjustments := []helpers.SpotAdjustment{{Asset: "BTC", Qty: -0.0315, Ts: spotTestDay(2)}}
 	prices := spotTestPrices(map[int]float64{2: 62000})
 
-	closed, open := BuildSpotAssetPositions(legs, holdings, spotTestStart, prices, map[string]float64{"BTC": 0.00001}, adjustments)
+	closed, open := buildSpotTest(legs, holdings, spotTestStart, prices, map[string]float64{"BTC": 0.00001}, adjustments)
 	if len(closed) != 0 || len(open) != 1 {
 		t.Fatalf("want one open BTC position, got %d closed %d open", len(closed), len(open))
 	}
@@ -101,7 +108,7 @@ func TestSpotPositiveAdjustmentIsSyntheticBuyAtDayPrice(t *testing.T) {
 	adjustments := []helpers.SpotAdjustment{{Asset: "BTC", Qty: 0.005, Ts: spotTestDay(2)}}
 	prices := spotTestPrices(map[int]float64{2: 62000})
 
-	_, open := BuildSpotAssetPositions(legs, holdings, spotTestStart, prices, map[string]float64{"BTC": 0.00001}, adjustments)
+	_, open := buildSpotTest(legs, holdings, spotTestStart, prices, map[string]float64{"BTC": 0.00001}, adjustments)
 	if len(open) != 1 || !spotNear(open[0].Amount, 0.055) {
 		t.Fatalf("want open 0.055 BTC, got %+v", open)
 	}
@@ -126,7 +133,7 @@ func TestSpotNegativeAdjustmentClosesLotWhenBalanceIsGone(t *testing.T) {
 	adjustments := []helpers.SpotAdjustment{{Asset: "ETH", Qty: -0.0022, Ts: spotTestDay(4)}}
 	prices := spotTestPrices(map[int]float64{4: 2600})
 
-	closed, open := BuildSpotPositions(legs, holdings, spotTestStart, prices, map[string]float64{"ETH": 0.0001}, adjustments)
+	closed, open := buildSpotTest(legs, holdings, spotTestStart, prices, map[string]float64{"ETH": 0.0001}, adjustments)
 	if len(open) != 0 || len(closed) != 1 {
 		t.Fatalf("want one closed ETH sale, got %d closed %d open", len(closed), len(open))
 	}
@@ -147,16 +154,16 @@ func TestSpotSameDayNegativeAdjustmentFollowsTheBuy(t *testing.T) {
 	prices := spotTestPrices(map[int]float64{5: 60500})
 	minSizes := map[string]float64{"BTC": 0.00001}
 
-	lots, lotOpen := BuildSpotPositions([]helpers.SpotLeg{buy}, holdings, spotTestStart, prices, minSizes, adjustments)
-	if len(lots) != 0 || len(lotOpen) != 1 {
-		t.Fatalf("want a single live lot, got %d closed %d open", len(lots), len(lotOpen))
+	closed, open := buildSpotTest([]helpers.SpotLeg{buy}, holdings, spotTestStart, prices, minSizes, adjustments)
+	if len(closed) != 0 || len(open) != 1 {
+		t.Fatalf("want a single open position, got %d closed %d open", len(closed), len(open))
 	}
-	pos := lotOpen[0]
+	pos := open[0]
 	if !spotNear(pos.Amount, 0.05) || spotOpeningSynthetics(pos.Orders) != 0 || len(pos.Orders) != 2 {
 		t.Fatalf("want open 0.05 from the buy and one synthetic sell, got %+v", pos)
 	}
 	sell := pos.Orders[1]
-	if sell.Status != helpers.OrderStatusSynthetic || sell.Side != "SELL" || !sell.Trade.DoneAt.After(pos.Orders[0].Trade.DoneAt) {
+	if sell.Status != helpers.OrderStatusAdjustment || sell.Side != "SELL" || !sell.Trade.DoneAt.After(pos.Orders[0].Trade.DoneAt) {
 		t.Fatalf("synthetic sell must follow the 12:00 buy, got %+v", pos.Orders)
 	}
 	if !spotNear(sell.Trade.Profit, 25) {
@@ -164,7 +171,7 @@ func TestSpotSameDayNegativeAdjustmentFollowsTheBuy(t *testing.T) {
 	}
 }
 
-func TestSpotProdEthTransferAndAdjustmentsCloseWithoutOpeningSynthetic(t *testing.T) {
+func TestSpotTransfersAndOffsettingAdjustmentsCloseWithoutOpeningSynthetic(t *testing.T) {
 	start := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	d0909 := time.Date(2026, 9, 9, 0, 0, 0, 0, time.UTC)
 	d0922 := time.Date(2026, 9, 22, 0, 0, 0, 0, time.UTC)
@@ -189,7 +196,7 @@ func TestSpotProdEthTransferAndAdjustmentsCloseWithoutOpeningSynthetic(t *testin
 		return 0, false
 	}
 
-	closed, open := BuildSpotAssetPositions(legs, nil, start, prices, map[string]float64{"ETH": 0.0001}, adjustments)
+	closed, open := buildSpotTest(legs, nil, start, prices, map[string]float64{"ETH": 0.0001}, adjustments)
 	if len(open) != 0 || len(closed) != 1 {
 		t.Fatalf("want one closed ETH position, got %d closed %d open", len(closed), len(open))
 	}
@@ -202,8 +209,8 @@ func TestSpotProdEthTransferAndAdjustmentsCloseWithoutOpeningSynthetic(t *testin
 		qty          float64
 	}{
 		{"BUY", helpers.OrderStatusTransfer, 0.00432653},
-		{"SELL", helpers.OrderStatusSynthetic, 0.00432653},
-		{"BUY", helpers.OrderStatusSynthetic, 0.0022322},
+		{"SELL", helpers.OrderStatusAdjustment, 0.00432653},
+		{"BUY", helpers.OrderStatusAdjustment, 0.0022322},
 		{"SELL", helpers.OrderStatusTransfer, 0.00223219},
 	}
 	for i, w := range want {
@@ -220,7 +227,7 @@ func TestSpotProdEthTransferAndAdjustmentsCloseWithoutOpeningSynthetic(t *testin
 	}
 }
 
-func TestSpotOwnerExampleAdjustmentBuyBetweenTrades(t *testing.T) {
+func TestSpotAdjustmentBuyBetweenTradesJoinsTheSale(t *testing.T) {
 	legs := []helpers.SpotLeg{
 		spotTestLeg("SOL", "buy", 0.1, 100, 1),
 		spotTestLeg("SOL", "sell", 0.3, 130, 3),
@@ -229,7 +236,7 @@ func TestSpotOwnerExampleAdjustmentBuyBetweenTrades(t *testing.T) {
 	prices := spotTestPrices(map[int]float64{2: 120})
 	holdings := []helpers.SpotHolding{{Asset: "SOL", Qty: 0, PriceUSD: 140}}
 
-	closed, open := BuildSpotAssetPositions(legs, holdings, spotTestStart, prices, map[string]float64{"SOL": 0.001}, adjustments)
+	closed, open := buildSpotTest(legs, holdings, spotTestStart, prices, map[string]float64{"SOL": 0.001}, adjustments)
 	if len(open) != 0 || len(closed) != 1 {
 		t.Fatalf("want one closed SOL position, got %d closed %d open", len(closed), len(open))
 	}
@@ -238,7 +245,7 @@ func TestSpotOwnerExampleAdjustmentBuyBetweenTrades(t *testing.T) {
 		t.Fatalf("want buy, synthetic buy, sell; got %+v", sale.Orders)
 	}
 	syn := sale.Orders[1]
-	if syn.Status != helpers.OrderStatusSynthetic || syn.Side != "BUY" || !spotNear(syn.AmountFilled, 0.2) || !spotNear(syn.AveragePrice, 120) || !syn.Trade.DoneAt.Equal(spotTestStart.AddDate(0, 0, 2)) {
+	if syn.Status != helpers.OrderStatusAdjustment || syn.Side != "BUY" || syn.ExchangeOrderID != adjustments[0].Key() || !spotNear(syn.AmountFilled, 0.2) || !spotNear(syn.AveragePrice, 120) || !syn.Trade.DoneAt.Equal(spotTestStart.AddDate(0, 0, 2)) {
 		t.Fatalf("unexpected synthetic buy %+v", syn)
 	}
 	if !spotNear(sale.Amount, 0.3) || !spotNear(sale.EntryPrice, 34.0/0.3) || !spotNear(sale.ExitPrice, 130) || !spotNear(sale.Pnl, 5) {
@@ -252,12 +259,12 @@ func TestSpotUnexplainedRemainderStillOpensAtWindowStart(t *testing.T) {
 	adjustments := []helpers.SpotAdjustment{{Asset: "BTC", Qty: 0.01, Ts: spotTestDay(2)}}
 	prices := spotTestPrices(map[int]float64{2: 60000})
 
-	_, open := BuildSpotAssetPositions(legs, holdings, spotTestStart, prices, map[string]float64{"BTC": 0.00001}, adjustments)
+	_, open := buildSpotTest(legs, holdings, spotTestStart, prices, map[string]float64{"BTC": 0.00001}, adjustments)
 	if len(open) != 1 || !spotNear(open[0].Amount, 0.05) {
 		t.Fatalf("want open 0.05, got %+v", open)
 	}
 	first := open[0].Orders[0]
-	if first.Status != helpers.OrderStatusSynthetic || first.ExchangeOrderID != "" || !spotNear(first.AmountFilled, 0.06) || !first.Trade.DoneAt.Equal(spotTestStart) {
+	if first.Status != helpers.OrderStatusSynthetic || first.ExchangeOrderID != helpers.SpotSyntheticKey("BTC", spotTestStart.UnixMilli()) || !spotNear(first.AmountFilled, 0.06) || !first.Trade.DoneAt.Equal(spotTestStart) {
 		t.Fatalf("want a 0.06 opening synthetic at the window start, got %+v", first)
 	}
 }
@@ -275,14 +282,9 @@ func TestSpotAssetGroupsClosedLotsIntoOneSale(t *testing.T) {
 	holdings := []helpers.SpotHolding{{Asset: "BTC", Qty: 0, PriceUSD: 195}}
 	minSizes := map[string]float64{"BTC": 0.00001}
 
-	lots, _ := BuildSpotPositions(legs, holdings, spotTestStart, nil, minSizes, nil)
-	if len(lots) != 2 {
-		t.Fatalf("lot view: want 2 closed lots, got %d", len(lots))
-	}
-
-	closed, open := BuildSpotAssetPositions(legs, holdings, spotTestStart, nil, minSizes, nil)
+	closed, open := buildSpotTest(legs, holdings, spotTestStart, nil, minSizes, nil)
 	if len(open) != 0 || len(closed) != 1 {
-		t.Fatalf("asset view: want one closed sale, got %d closed %d open", len(closed), len(open))
+		t.Fatalf("want one closed sale, got %d closed %d open", len(closed), len(open))
 	}
 	sale := closed[0]
 	if !spotNear(sale.Amount, 3) || !spotNear(sale.Pnl, -10) || !spotNear(sale.Commission, 0.04) || !spotNear(sale.NetPnl, -10.04) {
@@ -297,10 +299,7 @@ func TestSpotAssetGroupsClosedLotsIntoOneSale(t *testing.T) {
 	if len(sale.Orders) != 4 || *sale.Status != "lose" {
 		t.Fatalf("want 4 executions and a loss, got %d %s", len(sale.Orders), *sale.Status)
 	}
-	var lotPnl, sellProfit float64
-	for _, lot := range lots {
-		lotPnl += lot.Pnl
-	}
+	var sellProfit float64
 	for i, order := range sale.Orders {
 		if order.PositionID != sale.ID {
 			t.Fatalf("order %d belongs to another position", i)
@@ -310,8 +309,8 @@ func TestSpotAssetGroupsClosedLotsIntoOneSale(t *testing.T) {
 		}
 		sellProfit += order.Trade.Profit
 	}
-	if !spotNear(lotPnl, sale.Pnl) || !spotNear(sellProfit, -10.02) {
-		t.Fatalf("pnl must equal the lot sum: lots %v sale %v sells %v", lotPnl, sale.Pnl, sellProfit)
+	if !spotNear(sellProfit, -10.02) {
+		t.Fatalf("sell profits must sum to the net of both lots (10 - 20 - fees), got %v", sellProfit)
 	}
 }
 
@@ -320,14 +319,9 @@ func TestSpotAssetGroupsHeldAssetIntoOneOpenPosition(t *testing.T) {
 	holdings := []helpers.SpotHolding{{Asset: "BTC", Qty: 1, PriceUSD: 230}}
 	minSizes := map[string]float64{"BTC": 0.00001}
 
-	lots, lotOpen := BuildSpotPositions(legs, holdings, spotTestStart, nil, minSizes, nil)
-	if len(lots) != 1 || len(lotOpen) != 1 || !spotNear(lotOpen[0].RealizedPnl, 20) {
-		t.Fatalf("lot view: want 1 closed lot and the live lot, got %d closed %d open", len(lots), len(lotOpen))
-	}
-
-	closed, open := BuildSpotAssetPositions(legs, holdings, spotTestStart, nil, minSizes, nil)
+	closed, open := buildSpotTest(legs, holdings, spotTestStart, nil, minSizes, nil)
 	if len(closed) != 0 || len(open) != 1 {
-		t.Fatalf("asset view: want one open position, got %d closed %d open", len(closed), len(open))
+		t.Fatalf("want one open position, got %d closed %d open", len(closed), len(open))
 	}
 	pos := open[0]
 	if !spotNear(pos.Amount, 1) || !spotNear(pos.EntryPrice, 200) || !spotNear(pos.CurrentPrice, 230) {
@@ -346,7 +340,7 @@ func TestSpotAssetGroupsHeldAssetIntoOneOpenPosition(t *testing.T) {
 
 func TestSpotAssetSyntheticHoldingWithoutHistory(t *testing.T) {
 	holdings := []helpers.SpotHolding{{Asset: "SOL", Qty: 3, AvgPx: 150, PriceUSD: 160}}
-	closed, open := BuildSpotAssetPositions(nil, holdings, spotTestStart, nil, map[string]float64{"SOL": 0.001}, nil)
+	closed, open := buildSpotTest(nil, holdings, spotTestStart, nil, map[string]float64{"SOL": 0.001}, nil)
 	if len(closed) != 0 || len(open) != 1 || !spotNear(open[0].Amount, 3) || !spotNear(open[0].EntryPrice, 150) {
 		t.Fatalf("want one synthetic SOL holding, got %+v", open)
 	}
@@ -366,13 +360,9 @@ func TestSpotAssetAdjustmentSellClosesTheLastLot(t *testing.T) {
 	prices := spotTestPrices(map[int]float64{4: 2250})
 	minSizes := map[string]float64{"ETH": 0.0001}
 
-	lots, _ := BuildSpotPositions(legs, holdings, spotTestStart, prices, minSizes, adjustments)
-	if len(lots) != 2 || len(lots[1].Orders) != 2 || !spotNear(lots[1].Pnl, 25) {
-		t.Fatalf("lot view: want the second lot closed by the synthetic sell, got %+v", lots)
-	}
-	closed, open := BuildSpotAssetPositions(legs, holdings, spotTestStart, prices, minSizes, adjustments)
+	closed, open := buildSpotTest(legs, holdings, spotTestStart, prices, minSizes, adjustments)
 	if len(open) != 0 || len(closed) != 1 {
-		t.Fatalf("asset view: want one closed sale, got %d closed %d open", len(closed), len(open))
+		t.Fatalf("want one closed sale, got %d closed %d open", len(closed), len(open))
 	}
 	sale := closed[0]
 	if len(sale.Orders) != 4 || !spotNear(sale.Pnl, 125) || !spotNear(sale.Amount, 1.5) || !spotNear(sale.Commission, 0.03) {
@@ -380,6 +370,9 @@ func TestSpotAssetAdjustmentSellClosesTheLastLot(t *testing.T) {
 	}
 	if !sale.ClosedAt.Equal(time.UnixMilli(spotTestDay(5) - 1).UTC()) {
 		t.Fatalf("closed at the synthetic sell, got %v", sale.ClosedAt)
+	}
+	if sell := sale.Orders[3]; sell.Status != helpers.OrderStatusAdjustment || !spotNear(sell.Trade.Profit, 25) {
+		t.Fatalf("the adjustment sell must realize 25 against the second lot, got %+v", sell)
 	}
 }
 
@@ -390,13 +383,13 @@ func TestSpotMidHistoryShortfallIsPricedAtTheSell(t *testing.T) {
 	}
 	prices := spotTestPrices(map[int]float64{0: 50, 2: 151})
 
-	closed, open := BuildSpotAssetPositions(legs, nil, spotTestStart, prices, map[string]float64{"BTC": 0.00001}, nil)
+	closed, open := buildSpotTest(legs, nil, spotTestStart, prices, map[string]float64{"BTC": 0.00001}, nil)
 	if len(open) != 0 || len(closed) != 1 {
 		t.Fatalf("want one closed position, got %d closed %d open", len(closed), len(open))
 	}
 	sale := closed[0]
 	syn := sale.Orders[0]
-	if syn.Status != helpers.OrderStatusSynthetic || !spotNear(syn.AveragePrice, 150) || !syn.Trade.DoneAt.Equal(spotTestStart.AddDate(0, 0, 2)) {
+	if syn.Status != helpers.OrderStatusSynthetic || syn.ExchangeOrderID != helpers.SpotSyntheticKey("BTC", spotTestDay(2)) || !spotNear(syn.AveragePrice, 150) || !syn.Trade.DoneAt.Equal(spotTestStart.AddDate(0, 0, 2)) {
 		t.Fatalf("want the shortfall bought at the sell price and time, got %+v", syn)
 	}
 	if !spotNear(sale.Pnl, 0) {
@@ -409,7 +402,7 @@ func TestSpotBaseFeeReducesInventory(t *testing.T) {
 	buy.FeeUSD, buy.FeeBase = 0, 0.001
 	holdings := []helpers.SpotHolding{{Asset: "BTC", Qty: 0.999, AvgPx: 100, PriceUSD: 110}}
 
-	_, open := BuildSpotAssetPositions([]helpers.SpotLeg{buy}, holdings, spotTestStart, nil, map[string]float64{"BTC": 0.00001}, nil)
+	_, open := buildSpotTest([]helpers.SpotLeg{buy}, holdings, spotTestStart, nil, map[string]float64{"BTC": 0.00001}, nil)
 	if len(open) != 1 || !spotNear(open[0].Amount, 0.999) {
 		t.Fatalf("want open 0.999, got %+v", open)
 	}
@@ -421,7 +414,7 @@ func TestSpotBaseFeeReducesInventory(t *testing.T) {
 	}
 
 	sell := spotTestLeg("BTC", "sell", 0.999, 120, 2)
-	closed, open := BuildSpotAssetPositions([]helpers.SpotLeg{buy, sell}, nil, spotTestStart, nil, map[string]float64{"BTC": 0.00001}, nil)
+	closed, open := buildSpotTest([]helpers.SpotLeg{buy, sell}, nil, spotTestStart, nil, map[string]float64{"BTC": 0.00001}, nil)
 	if len(open) != 0 || len(closed) != 1 || len(closed[0].Orders) != 2 {
 		t.Fatalf("selling the net quantity must close the lot without leftovers, got %d closed %d open", len(closed), len(open))
 	}
@@ -431,18 +424,101 @@ func TestSpotBaseFeeReducesInventory(t *testing.T) {
 	}
 }
 
-func TestSpotTodayNegativeAdjustmentIsNotInTheFuture(t *testing.T) {
-	now := time.Now().UTC()
+func TestSpotTodayNegativeAdjustmentIsCappedAtNow(t *testing.T) {
+	now := spotTestStart.AddDate(0, 0, 10).Add(9 * time.Hour)
 	today := helpers.SpotDayStart(now.UnixMilli())
 	start := time.UnixMilli(today).UTC().AddDate(0, 0, -1)
 	buy := helpers.SpotLeg{Asset: "BTC", Quote: "USDT", InstId: "BTC-USDT", OrdId: "b", OrdType: "market", Side: "buy", Qty: 0.1, PxUSD: 100, Ts: start.UnixMilli()}
 	adjustments := []helpers.SpotAdjustment{{Asset: "BTC", Qty: -0.1, Ts: today}}
 
-	closed, _ := BuildSpotAssetPositions([]helpers.SpotLeg{buy}, nil, start, nil, map[string]float64{"BTC": 0.00001}, adjustments)
+	closed, _ := BuildSpotPositions([]helpers.SpotLeg{buy}, nil, start, now, nil, map[string]float64{"BTC": 0.00001}, adjustments)
 	if len(closed) != 1 {
 		t.Fatalf("want one closed position, got %d", len(closed))
 	}
-	if closed[0].ClosedAt.After(time.Now()) || closed[0].ClosedAt.UnixMilli() < today {
-		t.Fatalf("closed at %v, want today but not in the future", closed[0].ClosedAt)
+	if !closed[0].ClosedAt.Equal(now) {
+		t.Fatalf("closed at %v, want now %v", closed[0].ClosedAt, now)
+	}
+
+	closed, _ = BuildSpotPositions([]helpers.SpotLeg{buy}, nil, start, now.AddDate(0, 0, 1), nil, map[string]float64{"BTC": 0.00001}, adjustments)
+	if want := time.UnixMilli(today + helpers.SpotDayMs - 1).UTC(); len(closed) != 1 || !closed[0].ClosedAt.Equal(want) {
+		t.Fatalf("a past day closes at its end %v, got %+v", want, closed)
+	}
+}
+
+func TestSpotAdjustmentBeforeTheWindowIsPlacedAtTheWindowStart(t *testing.T) {
+	start := spotTestStart.Add(15 * time.Hour)
+	adjustments := []helpers.SpotAdjustment{{Asset: "BTC", Qty: 0.1, Ts: spotTestDay(0)}}
+	sell := spotTestLeg("BTC", "sell", 0.1, 110, 1)
+
+	closed, open := buildSpotTest([]helpers.SpotLeg{sell}, nil, start, spotTestPrices(map[int]float64{0: 100}), map[string]float64{"BTC": 0.00001}, adjustments)
+	if len(open) != 0 || len(closed) != 1 {
+		t.Fatalf("want one closed position, got %d closed %d open", len(closed), len(open))
+	}
+	sale := closed[0]
+	buy := sale.Orders[0]
+	if buy.Status != helpers.OrderStatusAdjustment || !buy.Trade.DoneAt.Equal(start) || !sale.CreatedAt.Equal(start) {
+		t.Fatalf("the adjustment buy must not precede the window start %v, got %+v", start, buy)
+	}
+	if spotOpeningSynthetics(sale.Orders) != 0 || !spotNear(sale.Pnl, 1) {
+		t.Fatalf("want no opening synthetic and pnl 1, got %+v", sale)
+	}
+}
+
+func TestSpotOpenLotKeepsItsOrders(t *testing.T) {
+	legs := []helpers.SpotLeg{
+		spotTestLeg("BTC", "buy", 1, 100, 1),
+		spotTestLeg("BTC", "sell", 1, 110, 2),
+		spotTestLeg("BTC", "buy", 2, 200, 3),
+		spotTestLeg("BTC", "sell", 0.5, 210, 4),
+	}
+	holdings := []helpers.SpotHolding{{Asset: "BTC", Qty: 1.5, AvgPx: 200, PriceUSD: 220}}
+
+	closed, open := buildSpotTest(legs, holdings, spotTestStart, nil, map[string]float64{"BTC": 0.00001}, nil)
+	if len(closed) != 0 || len(open) != 1 {
+		t.Fatalf("want one open position, got %d closed %d open", len(closed), len(open))
+	}
+	pos := open[0]
+	if len(pos.Orders) != 4 || spotOpeningSynthetics(pos.Orders) != 0 {
+		t.Fatalf("the live lot must keep its own executions without a synthetic, got %+v", pos.Orders)
+	}
+	if !spotNear(pos.Amount, 1.5) || !spotNear(pos.EntryPrice, 200) || !pos.OpenTime.Equal(spotTestStart.AddDate(0, 0, 1)) {
+		t.Fatalf("unexpected open position %+v", pos)
+	}
+}
+
+func TestSpotSyntheticsAtTheSameInstantGetDistinctKeys(t *testing.T) {
+	legs := []helpers.SpotLeg{
+		spotTestLeg("BTC", "sell", 1, 100, 1),
+		spotTestLeg("BTC", "sell", 1, 100, 1),
+		spotTestLeg("BTC", "buy", 2, 100, 1),
+	}
+	legs[1].OrdId = "second"
+
+	closed, _ := buildSpotTest(legs, nil, spotTestStart, nil, map[string]float64{"BTC": 0.00001}, nil)
+	if len(closed) != 1 {
+		t.Fatalf("want one closed position, got %d", len(closed))
+	}
+	seen := map[string]bool{}
+	for _, order := range closed[0].Orders {
+		if order.Status != helpers.OrderStatusSynthetic {
+			continue
+		}
+		if order.ExchangeOrderID == "" || seen[order.ExchangeOrderID] {
+			t.Fatalf("synthetic keys must be present and unique, got %+v", closed[0].Orders)
+		}
+		seen[order.ExchangeOrderID] = true
+	}
+	if len(seen) != 2 {
+		t.Fatalf("want two synthetics, got %d", len(seen))
+	}
+}
+
+func TestSpotMergedMarketIsTheLatestLots(t *testing.T) {
+	merged := mergeSpotLots([]spotLot{
+		{start: spotTestStart.AddDate(0, 0, 3), quote: "USDT", instId: "BTC-USDT"},
+		{start: spotTestStart.AddDate(0, 0, 1), quote: "USDC", instId: "BTC-USDC"},
+	})
+	if merged.quote != "USDT" || merged.instId != "BTC-USDT" || !merged.start.Equal(spotTestStart.AddDate(0, 0, 1)) {
+		t.Fatalf("want the market of the latest lot, got %s %s from %v", merged.quote, merged.instId, merged.start)
 	}
 }

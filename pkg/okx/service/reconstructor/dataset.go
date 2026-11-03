@@ -23,6 +23,7 @@ type Dataset struct {
 	cutoff   *time.Time
 	scope    scope.Scope
 	windowMs int64
+	now      time.Time
 
 	closed      []models.ClosedPosition
 	open        []models.OpenPosition
@@ -55,7 +56,7 @@ type Dataset struct {
 }
 
 func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope) (*Dataset, error) {
-	d := &Dataset{client: client, baseURL: baseURL, cutoff: cutoff, scope: s}
+	d := &Dataset{client: client, baseURL: baseURL, cutoff: cutoff, scope: s, now: time.Now().UTC()}
 	cutoffMs := window.StartMs(cutoff)
 	d.windowMs = cutoffMs
 	if d.windowMs <= 0 {
@@ -337,7 +338,7 @@ func (d *Dataset) loadSpotBills() error {
 			from = dayStart
 		}
 	}
-	cursor := time.Now().UnixMilli()
+	cursor := d.now.UnixMilli()
 	var bills []models.Bill
 	if d.scope.Has(scope.Transactions) && d.billsOK {
 		for _, b := range d.bills {
@@ -415,26 +416,10 @@ func (d *Dataset) SpotBillsCursor() time.Time {
 	return time.UnixMilli(d.spotBillsCursorMs).UTC()
 }
 
+// SpotPositions reconstructs the spot lots and groups them into one position
+// per asset: open while the asset is held, closed otherwise. MAE/MFE are left
+// to the caller because a grouped position can span the whole history window.
 func (d *Dataset) SpotPositions() ([]domain.Position, []domain.OpenPosition, error) {
-	closed, open, err := d.buildSpot(builders.BuildSpotPositions)
-	if err != nil {
-		return nil, nil, err
-	}
-	applySpotExcursions(d.client, d.baseURL, closed)
-	return closed, open, nil
-}
-
-// SpotAssetPositions reconstructs the same lots as SpotPositions and groups
-// them into one position per asset: open while the asset is held, closed
-// otherwise. MAE/MFE are left to the caller because a grouped position can
-// span the whole history window.
-func (d *Dataset) SpotAssetPositions() ([]domain.Position, []domain.OpenPosition, error) {
-	return d.buildSpot(builders.BuildSpotAssetPositions)
-}
-
-type spotBuilder func([]helpers.SpotLeg, []helpers.SpotHolding, time.Time, helpers.PriceAt, map[string]float64, []helpers.SpotAdjustment) ([]domain.Position, []domain.OpenPosition)
-
-func (d *Dataset) buildSpot(build spotBuilder) ([]domain.Position, []domain.OpenPosition, error) {
 	if !d.spotOK || !d.balOK {
 		return nil, nil, fmt.Errorf("okx: spot dataset not loaded")
 	}
@@ -443,7 +428,7 @@ func (d *Dataset) buildSpot(build spotBuilder) ([]domain.Position, []domain.Open
 	}
 	pricer := newUSDPricer(d.client, d.baseURL)
 	legs := append(spotLegs(d.spotOrders, pricer), transferLegs(d.spotBills, pricer)...)
-	closed, open := build(legs, spotHoldings(d.balance), d.SpotWindowStart(), pricer.price, spotMinSizes(d.spotInstruments), d.spotAdjustments)
+	closed, open := builders.BuildSpotPositions(legs, spotHoldings(d.balance), d.SpotWindowStart(), d.now, pricer.price, spotMinSizes(d.spotInstruments), d.spotAdjustments)
 	return closed, open, nil
 }
 
