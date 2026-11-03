@@ -31,11 +31,14 @@ func BuildSpotPositions(legs []helpers.SpotLeg, holdings []helpers.SpotHolding, 
 		adjusted[adj.Asset] += adj.Qty
 	}
 	held := map[string]helpers.SpotHolding{}
+	explained := map[string]float64{}
 	for _, h := range holdings {
 		if helpers.IsStableAsset(h.Asset) {
 			continue
 		}
-		h.Qty = math.Max(h.Qty-adjusted[h.Asset], 0)
+		spot := math.Max(h.Qty-adjusted[h.Asset], 0)
+		explained[h.Asset] = spot
+		h.Qty = math.Min(h.Qty, spot)
 		held[h.Asset] = h
 		if _, ok := byAsset[h.Asset]; !ok && h.Qty*h.PriceUSD >= spotDustUSD {
 			byAsset[h.Asset] = nil
@@ -51,7 +54,7 @@ func BuildSpotPositions(legs []helpers.SpotLeg, holdings []helpers.SpotHolding, 
 	var closed []domain.Position
 	var open []domain.OpenPosition
 	for _, asset := range assets {
-		c, o := buildSpotAsset(asset, byAsset[asset], held[asset], windowStart, priceAt, minSizes[asset])
+		c, o := buildSpotAsset(asset, byAsset[asset], held[asset], explained[asset], windowStart, priceAt, minSizes[asset])
 		closed = append(closed, c...)
 		if o != nil {
 			open = append(open, *o)
@@ -99,7 +102,7 @@ func (lot spotLot) market(asset string) (pair, symbol string) {
 	return asset + quote, symbol
 }
 
-func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHolding, windowStart time.Time, priceAt helpers.PriceAt, minSize float64) ([]domain.Position, *domain.OpenPosition) {
+func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHolding, explained float64, windowStart time.Time, priceAt helpers.PriceAt, minSize float64) ([]domain.Position, *domain.OpenPosition) {
 	sort.SliceStable(legs, func(i, j int) bool { return legs[i].Ts < legs[j].Ts })
 
 	var buyQty, buyCost, sellQty float64
@@ -113,7 +116,7 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 	}
 
 	balance := holding.Qty
-	eps := math.Max(balance, buyQty) * 1e-9
+	eps := math.Max(math.Max(balance, explained), buyQty) * 1e-9
 
 	var inv spotInventory
 	var lot spotLot
@@ -169,7 +172,7 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 		lot = spotLot{}
 	}
 
-	if missing := balance - buyQty + sellQty; missing > eps {
+	if missing := explained - buyQty + sellQty; missing > eps {
 		addSynthetic(missing, windowStart)
 	}
 
