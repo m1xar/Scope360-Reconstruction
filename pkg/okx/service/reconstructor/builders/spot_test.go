@@ -522,3 +522,20 @@ func TestSpotMergedMarketIsTheLatestLots(t *testing.T) {
 		t.Fatalf("want the market of the latest lot, got %s %s from %v", merged.quote, merged.instId, merged.start)
 	}
 }
+
+func TestSpotResidueCreatesNoSynthetic(t *testing.T) {
+	legs := []helpers.SpotLeg{
+		spotTestLeg("ETH", "buy", 0.0022321950014775, 2500, 1),
+		spotTestLeg("ETH", "sell", 0.00223219, 2600, 2),
+		spotTestLeg("ETH", "sell", 0.0000003, 2600, 2),
+	}
+	holdings := []helpers.SpotHolding{{Asset: "ETH", Qty: 0.00000088, AvgPx: 2500, PriceUSD: 2600}}
+
+	closed, open := buildSpotTest(legs, holdings, spotTestStart, nil, map[string]float64{"ETH": 0.0001}, nil)
+	if len(closed) != 1 || len(open) != 0 {
+		t.Fatalf("want one closed position, got %d closed %d open", len(closed), len(open))
+	}
+	if n := spotOpeningSynthetics(closed[0].Orders); n != 0 {
+		t.Fatalf("a residue below the minimum size must not become a synthetic, got %d synthetic orders", n)
+	}
+}
