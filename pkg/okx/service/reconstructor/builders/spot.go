@@ -11,7 +11,10 @@ import (
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/helpers"
 )
 
-const spotDustUSD = 0.10
+const (
+	spotDustUSD    = 0.10
+	spotResidueUSD = 0.01
+)
 
 // BuildSpotPositions reconstructs the spot history of every asset as lots and
 // groups all lots of an asset into a single position. A lot opens with the
@@ -293,6 +296,18 @@ func buildSpotLots(asset string, legs []helpers.SpotLeg, holding helpers.SpotHol
 		}
 		lot.orders = append(lot.orders, syntheticSpotOrder(key, qty, px, at))
 	}
+	residue := func(qty, px float64) bool {
+		if qty <= eps || (minSize > 0 && qty < minSize) {
+			return true
+		}
+		if px <= 0 {
+			px = holding.PriceUSD
+		}
+		if px <= 0 {
+			px = syntheticPrice(qty)
+		}
+		return px > 0 && qty*px < spotResidueUSD
+	}
 	dust := func(qty float64) bool {
 		if qty <= eps {
 			return true
@@ -312,7 +327,7 @@ func buildSpotLots(asset string, legs []helpers.SpotLeg, holding helpers.SpotHol
 		lot = spotLot{}
 	}
 
-	if missing := balance - buyQty + sellQty; missing > eps {
+	if missing := balance - buyQty + sellQty; !residue(missing, 0) {
 		addSynthetic(missing, 0, windowStart)
 	}
 
@@ -335,7 +350,7 @@ func buildSpotLots(asset string, legs []helpers.SpotLeg, holding helpers.SpotHol
 			lot.orders = append(lot.orders, spotOrderFromLeg(leg, 0))
 			continue
 		}
-		if shortfall := leg.Qty - inv.qty; shortfall > eps {
+		if shortfall := leg.Qty - inv.qty; !residue(shortfall, leg.PxUSD) {
 			px := leg.PxUSD
 			if px <= 0 && priceAt != nil {
 				px, _ = priceAt(asset, leg.Ts)
