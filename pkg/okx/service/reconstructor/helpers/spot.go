@@ -18,6 +18,9 @@ type SpotLeg struct {
 	FeeUSD   float64
 	Ts       int64
 	Transfer bool
+	// Adjustment marks a synthetic execution derived from a SpotAdjustment;
+	// OrdId then holds the adjustment Key.
+	Adjustment bool
 }
 
 type SpotHolding struct {
@@ -41,6 +44,11 @@ type SpotAdjustment struct {
 func (a SpotAdjustment) Key() string {
 	return a.Asset + "@" + strconv.FormatInt(a.Ts, 10)
 }
+
+const SpotDayMs = int64(24 * 60 * 60 * 1000)
+
+// SpotDayStart is the start of the UTC day of ts in milliseconds.
+func SpotDayStart(ts int64) int64 { return ts - ts%SpotDayMs }
 
 const (
 	OrderStatusSynthetic = "SYNTHETIC"

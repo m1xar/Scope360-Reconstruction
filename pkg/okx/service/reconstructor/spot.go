@@ -187,13 +187,9 @@ func transferLegs(bills []models.Bill, pricer *usdPricer) []helpers.SpotLeg {
 	return legs
 }
 
-const dayMs = int64(24 * 60 * 60 * 1000)
-
-func dayStartMs(ts int64) int64 { return ts - ts%dayMs }
-
 // spotAdjustments aggregates per asset and UTC day every balance change that
-// is neither a cash spot fill nor a transfer, so option premiums, deliveries
-// and conversions explain the gap between spot fills and the live balance.
+// is neither a cash spot fill nor a transfer (option premiums, deliveries,
+// conversions); the builders replay each one as a synthetic execution on its day.
 func spotAdjustments(bills []models.Bill) []helpers.SpotAdjustment {
 	byKey := map[string]*helpers.SpotAdjustment{}
 	for _, b := range bills {
@@ -208,7 +204,7 @@ func spotAdjustments(bills []models.Bill) []helpers.SpotAdjustment {
 			continue
 		}
 		ts := helpers.MustInt64(b.Ts)
-		adj := helpers.SpotAdjustment{Asset: b.Ccy, Ts: dayStartMs(ts)}
+		adj := helpers.SpotAdjustment{Asset: b.Ccy, Ts: helpers.SpotDayStart(ts)}
 		key := adj.Key()
 		if cur, ok := byKey[key]; ok {
 			cur.Qty += chg
