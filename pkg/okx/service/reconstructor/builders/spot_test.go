@@ -539,3 +539,15 @@ func TestSpotResidueCreatesNoSynthetic(t *testing.T) {
 		t.Fatalf("a residue below the minimum size must not become a synthetic, got %d synthetic orders", n)
 	}
 }
+
+func TestSpotSaleWorthLessThanDustIsDropped(t *testing.T) {
+	legs := []helpers.SpotLeg{
+		spotTestLeg("BTC", "buy", 0.00000001, 77507.4, 1),
+		spotTestLeg("BTC", "sell", 0.00000001, 77849.3, 2),
+	}
+
+	closed, open := buildSpotTest(legs, nil, spotTestStart, nil, map[string]float64{"BTC": 0.00001}, nil)
+	if len(closed) != 0 || len(open) != 0 {
+		t.Fatalf("a sale worth less than the dust floor must not become a position, got %d closed %d open", len(closed), len(open))
+	}
+}

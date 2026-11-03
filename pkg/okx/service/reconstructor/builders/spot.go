@@ -145,7 +145,7 @@ func (l spotAssetLots) grouped(asset string) ([]domain.Position, *domain.OpenPos
 	if l.open != nil {
 		return nil, l.openPosition(asset, merged)
 	}
-	if merged.sellQty <= 0 {
+	if merged.sellQty <= 0 || merged.proceeds < spotDustUSD {
 		return nil, nil
 	}
 	return []domain.Position{spotClosedPosition(asset, merged)}, nil
