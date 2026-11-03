@@ -19,6 +19,23 @@ const spotDustUSD = 0.10
 // A closed lot is a closed position with volume-weighted entry/exit prices;
 // the live lot is the open position.
 func BuildSpotPositions(legs []helpers.SpotLeg, holdings []helpers.SpotHolding, windowStart time.Time, priceAt helpers.PriceAt, minSizes map[string]float64, adjustments []helpers.SpotAdjustment) ([]domain.Position, []domain.OpenPosition) {
+	return buildSpot(legs, holdings, windowStart, priceAt, minSizes, adjustments, false)
+}
+
+// BuildSpotAssetPositions reconstructs the lots exactly like BuildSpotPositions
+// and then groups every lot of an asset into a single position. Open or closed
+// is decided by the live balance alone. An asset that is still held becomes
+// one open position carrying every execution of all its lots, the realized pnl of all sells so far and the entry
+// price of the live lot. An asset that is no longer held becomes one closed
+// position over all its lots: volume-weighted entry/exit, summed pnl and fees,
+// opened at the first lot's start and closed at the last sell; buys whose units
+// left without a sell stay among its executions. Each sell keeps its own
+// realized pnl in Trade.Profit.
+func BuildSpotAssetPositions(legs []helpers.SpotLeg, holdings []helpers.SpotHolding, windowStart time.Time, priceAt helpers.PriceAt, minSizes map[string]float64, adjustments []helpers.SpotAdjustment) ([]domain.Position, []domain.OpenPosition) {
+	return buildSpot(legs, holdings, windowStart, priceAt, minSizes, adjustments, true)
+}
+
+func buildSpot(legs []helpers.SpotLeg, holdings []helpers.SpotHolding, windowStart time.Time, priceAt helpers.PriceAt, minSizes map[string]float64, adjustments []helpers.SpotAdjustment, group bool) ([]domain.Position, []domain.OpenPosition) {
 	byAsset := map[string][]helpers.SpotLeg{}
 	for _, leg := range legs {
 		if helpers.IsStableAsset(leg.Asset) {
@@ -54,7 +71,14 @@ func BuildSpotPositions(legs []helpers.SpotLeg, holdings []helpers.SpotHolding, 
 	var closed []domain.Position
 	var open []domain.OpenPosition
 	for _, asset := range assets {
-		c, o := buildSpotAsset(asset, byAsset[asset], held[asset], explained[asset], windowStart, priceAt, minSizes[asset])
+		lots := buildSpotLots(asset, byAsset[asset], held[asset], explained[asset], windowStart, priceAt, minSizes[asset])
+		var c []domain.Position
+		var o *domain.OpenPosition
+		if group {
+			c, o = lots.grouped(asset)
+		} else {
+			c, o = lots.positions(asset)
+		}
 		closed = append(closed, c...)
 		if o != nil {
 			open = append(open, *o)
@@ -102,7 +126,101 @@ func (lot spotLot) market(asset string) (pair, symbol string) {
 	return asset + quote, symbol
 }
 
-func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHolding, explained float64, windowStart time.Time, priceAt helpers.PriceAt, minSize float64) ([]domain.Position, *domain.OpenPosition) {
+// spotAssetLots is the lot reconstruction of one asset: the closed lots that
+// realized at least one sell, in chronological order, the closed lots whose
+// units left without a sell, and the live lot with its remaining balance,
+// entry price and market price when the asset is held.
+type spotAssetLots struct {
+	closed []spotLot
+	stray  []spotLot
+	open   *spotLot
+	amount float64
+	entry  float64
+	price  float64
+}
+
+func (l spotAssetLots) positions(asset string) ([]domain.Position, *domain.OpenPosition) {
+	closed := make([]domain.Position, 0, len(l.closed))
+	for _, lot := range l.closed {
+		closed = append(closed, spotClosedPosition(asset, lot))
+	}
+	if l.open == nil {
+		return closed, nil
+	}
+	return closed, l.openPosition(asset, *l.open)
+}
+
+func (l spotAssetLots) grouped(asset string) ([]domain.Position, *domain.OpenPosition) {
+	lots := append(append([]spotLot(nil), l.closed...), l.stray...)
+	if l.open != nil {
+		lots = append(lots, *l.open)
+	}
+	if len(lots) == 0 {
+		return nil, nil
+	}
+	merged := mergeSpotLots(lots)
+	if l.open != nil {
+		return nil, l.openPosition(asset, merged)
+	}
+	if merged.sellQty <= 0 {
+		return nil, nil
+	}
+	return []domain.Position{spotClosedPosition(asset, merged)}, nil
+}
+
+func (l spotAssetLots) openPosition(asset string, lot spotLot) *domain.OpenPosition {
+	id, _ := uuid.NewV7()
+	orders := append([]domain.Order(nil), lot.orders...)
+	for i := range orders {
+		orders[i].PositionID = id
+	}
+	pair, symbol := lot.market(asset)
+	return &domain.OpenPosition{
+		ID:           id,
+		Pair:         pair,
+		Symbol:       symbol,
+		Amount:       helpers.Round8(l.amount),
+		Multiplier:   1,
+		Side:         "LONG",
+		EntryPrice:   helpers.Round8(l.entry),
+		CurrentPrice: helpers.Round8(l.price),
+		Commission:   helpers.Round8(lot.buyFee + lot.sellFee),
+		RealizedPnl:  helpers.Round8(lot.realized),
+		OpenTime:     lot.start,
+		Orders:       orders,
+		IsSpot:       true,
+	}
+}
+
+// mergeSpotLots folds the lots of one asset into a single lot: executions of
+// all lots in time order, summed fees, sold quantity, proceeds and realized
+// pnl, the earliest start, the latest sell and the latest traded market.
+func mergeSpotLots(lots []spotLot) spotLot {
+	var merged spotLot
+	for _, lot := range lots {
+		if !lot.start.IsZero() && (merged.start.IsZero() || lot.start.Before(merged.start)) {
+			merged.start = lot.start
+		}
+		merged.orders = append(merged.orders, lot.orders...)
+		merged.buyFee += lot.buyFee
+		merged.sellQty += lot.sellQty
+		merged.proceeds += lot.proceeds
+		merged.sellFee += lot.sellFee
+		merged.realized += lot.realized
+		if lot.lastSell.After(merged.lastSell) {
+			merged.lastSell = lot.lastSell
+		}
+		if lot.quote != "" {
+			merged.quote, merged.instId = lot.quote, lot.instId
+		}
+	}
+	sort.SliceStable(merged.orders, func(i, j int) bool {
+		return merged.orders[i].Trade.DoneAt.Before(merged.orders[j].Trade.DoneAt)
+	})
+	return merged
+}
+
+func buildSpotLots(asset string, legs []helpers.SpotLeg, holding helpers.SpotHolding, explained float64, windowStart time.Time, priceAt helpers.PriceAt, minSize float64) spotAssetLots {
 	sort.SliceStable(legs, func(i, j int) bool { return legs[i].Ts < legs[j].Ts })
 
 	var buyQty, buyCost, sellQty float64
@@ -120,7 +238,7 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 
 	var inv spotInventory
 	var lot spotLot
-	var closed []domain.Position
+	var out spotAssetLots
 
 	syntheticPrice := func(qty float64) float64 {
 		px := holding.AvgPx
@@ -164,7 +282,9 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 	}
 	closeLot := func() {
 		if lot.sellQty > 0 {
-			closed = append(closed, spotClosedPosition(asset, lot))
+			out.closed = append(out.closed, lot)
+		} else if len(lot.orders) > 0 {
+			out.stray = append(out.stray, lot)
 		}
 		if inv.qty <= eps {
 			inv = spotInventory{}
@@ -215,7 +335,7 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 	}
 	if dust(balance) {
 		closeLot()
-		return closed, nil
+		return out
 	}
 	if inv.qty <= eps {
 		lot = spotLot{}
@@ -227,26 +347,9 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 	if entry <= 0 {
 		entry = holding.AvgPx
 	}
-	id, _ := uuid.NewV7()
-	for i := range lot.orders {
-		lot.orders[i].PositionID = id
-	}
-	pair, symbol := lot.market(asset)
-	return closed, &domain.OpenPosition{
-		ID:           id,
-		Pair:         pair,
-		Symbol:       symbol,
-		Amount:       helpers.Round8(balance),
-		Multiplier:   1,
-		Side:         "LONG",
-		EntryPrice:   helpers.Round8(entry),
-		CurrentPrice: helpers.Round8(holding.PriceUSD),
-		Commission:   helpers.Round8(lot.buyFee + lot.sellFee),
-		RealizedPnl:  helpers.Round8(lot.realized),
-		OpenTime:     lot.start,
-		Orders:       lot.orders,
-		IsSpot:       true,
-	}
+	out.open = &lot
+	out.amount, out.entry, out.price = balance, entry, holding.PriceUSD
+	return out
 }
 
 func spotClosedPosition(asset string, lot spotLot) domain.Position {
@@ -264,7 +367,7 @@ func spotClosedPosition(asset string, lot spotLot) domain.Position {
 		status = "win"
 	}
 
-	orders := lot.orders
+	orders := append([]domain.Order(nil), lot.orders...)
 	for i := range orders {
 		orders[i].PositionID = id
 	}

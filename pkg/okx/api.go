@@ -90,12 +90,39 @@ func GetSpotSnapshot(
 	days int,
 	history SpotHistory,
 ) (*SpotSnapshot, error) {
+	return spotSnapshot(client, creds, baseURL, days, history, (*reconstructor.Dataset).SpotPositions)
+}
+
+// GetSpotAssetSnapshot is GetSpotSnapshot with the lots of every asset grouped
+// into a single position: Open holds one position per asset that is still
+// held (all executions, realized pnl of every sell so far, entry price of the
+// live lot) and Closed one position per asset that is no longer held (all
+// executions, summed pnl, volume-weighted entry/exit over all lots). Closed
+// positions carry no MAE/MFE.
+func GetSpotAssetSnapshot(
+	client *resty.Client,
+	creds okxclient.Credentials,
+	baseURL string,
+	days int,
+	history SpotHistory,
+) (*SpotSnapshot, error) {
+	return spotSnapshot(client, creds, baseURL, days, history, (*reconstructor.Dataset).SpotAssetPositions)
+}
+
+func spotSnapshot(
+	client *resty.Client,
+	creds okxclient.Credentials,
+	baseURL string,
+	days int,
+	history SpotHistory,
+	build func(*reconstructor.Dataset) ([]domain.Position, []domain.OpenPosition, error),
+) (*SpotSnapshot, error) {
 	d, err := load(client, creds, baseURL, days, scope.Spot)
 	if err != nil {
 		return nil, err
 	}
 	d.AddSpotHistory(history.Orders, history.Bills, history.Adjustments, history.BillsCursor)
-	closed, open, err := d.SpotPositions()
+	closed, open, err := build(d)
 	if err != nil {
 		return nil, err
 	}
