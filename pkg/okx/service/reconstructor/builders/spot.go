@@ -226,8 +226,8 @@ func mergeSpotLots(lots []spotLot) spotLot {
 // spotAdjustmentLeg turns the net balance change of one asset and UTC day into
 // a synthetic execution at that day's USD price: a gain is a buy at the start
 // of the day (00:00:00.000 UTC), a loss a sell at its end (23:59:59.999 UTC),
-// so the day's own fills and transfers never run short because of it. The
-// current day is priced at now because its end has no candle yet.
+// so the day's own fills and transfers never run short because of it. A loss
+// on the current day is placed at now, so no position closes in the future.
 func spotAdjustmentLeg(adj helpers.SpotAdjustment, priceAt helpers.PriceAt, now int64) helpers.SpotLeg {
 	day := helpers.SpotDayStart(adj.Ts)
 	leg := helpers.SpotLeg{
@@ -242,13 +242,12 @@ func spotAdjustmentLeg(adj helpers.SpotAdjustment, priceAt helpers.PriceAt, now 
 	if adj.Qty < 0 {
 		leg.Side, leg.Qty = "sell", -adj.Qty
 		leg.Ts = day + helpers.SpotDayMs - 1
-	}
-	priceTs := leg.Ts
-	if now > day && now < priceTs {
-		priceTs = now
+		if now > day && now < leg.Ts {
+			leg.Ts = now
+		}
 	}
 	if priceAt != nil {
-		if px, ok := priceAt(adj.Asset, priceTs); ok {
+		if px, ok := priceAt(adj.Asset, leg.Ts); ok {
 			leg.PxUSD = px
 		}
 	}
@@ -261,8 +260,8 @@ func buildSpotLots(asset string, legs []helpers.SpotLeg, holding helpers.SpotHol
 	var buyQty, buyCost, sellQty float64
 	for _, leg := range legs {
 		if leg.Side == "buy" {
-			buyQty += leg.Qty
-			buyCost += leg.Qty * leg.PxUSD
+			buyQty += leg.Qty - leg.FeeBase
+			buyCost += (leg.Qty - leg.FeeBase) * leg.PxUSD
 		} else {
 			sellQty += leg.Qty
 		}
@@ -292,8 +291,10 @@ func buildSpotLots(asset string, legs []helpers.SpotLeg, holding helpers.SpotHol
 		}
 		return px
 	}
-	addSynthetic := func(qty float64, at time.Time) {
-		px := syntheticPrice(qty)
+	addSynthetic := func(qty, px float64, at time.Time) {
+		if px <= 0 {
+			px = syntheticPrice(qty)
+		}
 		inv.qty += qty
 		inv.cost += qty * px
 		if lot.start.IsZero() {
@@ -328,7 +329,7 @@ func buildSpotLots(asset string, legs []helpers.SpotLeg, holding helpers.SpotHol
 	}
 
 	if missing := balance - buyQty + sellQty; missing > eps {
-		addSynthetic(missing, windowStart)
+		addSynthetic(missing, 0, windowStart)
 	}
 
 	for _, leg := range legs {
@@ -342,14 +343,18 @@ func buildSpotLots(asset string, legs []helpers.SpotLeg, holding helpers.SpotHol
 			if leg.PxUSD <= 0 {
 				leg.PxUSD = firstPositive(inv.avg(), holding.AvgPx, holding.PriceUSD)
 			}
-			inv.qty += leg.Qty
-			inv.cost += leg.Qty * leg.PxUSD
+			inv.qty += leg.Qty - leg.FeeBase
+			inv.cost += (leg.Qty - leg.FeeBase) * leg.PxUSD
 			lot.buyFee += fee
 			lot.orders = append(lot.orders, spotOrderFromLeg(leg, 0))
 			continue
 		}
 		if shortfall := leg.Qty - inv.qty; shortfall > eps {
-			addSynthetic(shortfall, at)
+			px := leg.PxUSD
+			if px <= 0 && priceAt != nil {
+				px, _ = priceAt(asset, leg.Ts)
+			}
+			addSynthetic(shortfall, px, at)
 		}
 		avg := inv.avg()
 		if leg.PxUSD <= 0 {
@@ -380,7 +385,7 @@ func buildSpotLots(asset string, legs []helpers.SpotLeg, holding helpers.SpotHol
 	}
 	if inv.qty <= eps {
 		lot = spotLot{}
-		addSynthetic(balance, windowStart)
+		addSynthetic(balance, 0, windowStart)
 	}
 	openLot(windowStart)
 
