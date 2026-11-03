@@ -14,9 +14,10 @@ const spotDustUSD = 0.10
 
 // BuildSpotPositions reconstructs one lot per asset: the lot opens with the
 // first buy (or a synthetic basis when history starts mid-lot), absorbs every
-// buy and sell as an execution and closes when the remaining quantity falls
-// below the instrument's minimum order size. A closed lot is a closed position
-// with volume-weighted entry/exit prices; the live lot is the open position.
+// buy and sell as an execution and closes when the remainder is dust: below
+// the instrument's minimum order size, under spotDustUSD or effectively zero.
+// A closed lot is a closed position with volume-weighted entry/exit prices;
+// the live lot is the open position.
 func BuildSpotPositions(legs []helpers.SpotLeg, holdings []helpers.SpotHolding, windowStart time.Time, priceAt helpers.PriceAt, minSizes map[string]float64, adjustments []helpers.SpotAdjustment) ([]domain.Position, []domain.OpenPosition) {
 	byAsset := map[string][]helpers.SpotLeg{}
 	for _, leg := range legs {
@@ -74,19 +75,28 @@ func (inv *spotInventory) avg() float64 {
 }
 
 type spotLot struct {
-	start     time.Time
-	orders    []domain.Order
-	buyQty    float64
-	buyCost   float64
-	buyFee    float64
-	sellQty   float64
-	proceeds  float64
-	sellFee   float64
-	realized  float64
-	lastSell  time.Time
-	quote     string
-	instId    string
-	synthetic bool
+	start    time.Time
+	orders   []domain.Order
+	buyFee   float64
+	sellQty  float64
+	proceeds float64
+	sellFee  float64
+	realized float64
+	lastSell time.Time
+	quote    string
+	instId   string
+}
+
+func (lot spotLot) market(asset string) (pair, symbol string) {
+	quote := lot.quote
+	if quote == "" {
+		quote = "USDT"
+	}
+	symbol = lot.instId
+	if symbol == "" {
+		symbol = asset + "-" + quote
+	}
+	return asset + quote, symbol
 }
 
 func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHolding, windowStart time.Time, priceAt helpers.PriceAt, minSize float64) ([]domain.Position, *domain.OpenPosition) {
@@ -130,23 +140,15 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 		px := syntheticPrice(qty)
 		inv.qty += qty
 		inv.cost += qty * px
-		lot.buyQty += qty
-		lot.buyCost += qty * px
-		lot.synthetic = true
 		if lot.start.IsZero() {
 			lot.start = at
 		}
-		entry := syntheticSpotOrder("BUY", qty, px, at, 0)
-		entry.Status = helpers.OrderStatusSynthetic
-		lot.orders = append(lot.orders, entry)
+		lot.orders = append(lot.orders, syntheticSpotOrder(qty, px, at))
 	}
 	openLot := func(at time.Time) {
-		if !lot.start.IsZero() {
-			return
+		if lot.start.IsZero() {
+			lot.start = at
 		}
-		lot.start = at
-		lot.buyQty += inv.qty
-		lot.buyCost += inv.cost
 	}
 	dust := func(qty float64) bool {
 		if qty <= eps {
@@ -173,29 +175,22 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 
 	for _, leg := range legs {
 		at := time.UnixMilli(leg.Ts).UTC()
+		openLot(at)
+		if leg.Quote != "" {
+			lot.quote, lot.instId = leg.Quote, leg.InstId
+		}
+		fee := helpers.SpotFeeUSD(leg)
 		if leg.Side == "buy" {
-			openLot(at)
-			if leg.Quote != "" {
-				lot.quote, lot.instId = leg.Quote, leg.InstId
-			}
-			fee := helpers.SpotFeeUSD(leg)
 			inv.qty += leg.Qty
 			inv.cost += leg.Qty * leg.PxUSD
-			lot.buyQty += leg.Qty
-			lot.buyCost += leg.Qty * leg.PxUSD
 			lot.buyFee += fee
 			lot.orders = append(lot.orders, spotOrderFromLeg(leg, 0))
 			continue
 		}
-		openLot(at)
 		if shortfall := leg.Qty - inv.qty; shortfall > eps {
 			addSynthetic(shortfall, at)
 		}
-		if leg.Quote != "" {
-			lot.quote, lot.instId = leg.Quote, leg.InstId
-		}
 		avg := inv.avg()
-		fee := helpers.SpotFeeUSD(leg)
 		realized := (leg.PxUSD - avg) * leg.Qty
 		inv.qty -= leg.Qty
 		inv.cost -= avg * leg.Qty
@@ -233,14 +228,11 @@ func buildSpotAsset(asset string, legs []helpers.SpotLeg, holding helpers.SpotHo
 	for i := range lot.orders {
 		lot.orders[i].PositionID = id
 	}
-	quote := lot.quote
-	if quote == "" {
-		quote = "USDT"
-	}
+	pair, symbol := lot.market(asset)
 	return closed, &domain.OpenPosition{
 		ID:           id,
-		Pair:         asset + quote,
-		Symbol:       asset + "-" + quote,
+		Pair:         pair,
+		Symbol:       symbol,
 		Amount:       helpers.Round8(balance),
 		Multiplier:   1,
 		Side:         "LONG",
@@ -273,20 +265,13 @@ func spotClosedPosition(asset string, lot spotLot) domain.Position {
 	for i := range orders {
 		orders[i].PositionID = id
 	}
-	quote := lot.quote
-	if quote == "" {
-		quote = "USDT"
-	}
-	instId := lot.instId
-	if instId == "" {
-		instId = asset + "-" + quote
-	}
+	pair, symbol := lot.market(asset)
 
 	return domain.Position{
 		ID:         id,
 		Side:       "LONG",
-		Pair:       asset + quote,
-		Symbol:     instId,
+		Pair:       pair,
+		Symbol:     symbol,
 		Amount:     helpers.Round8(qty),
 		EntryPrice: helpers.Round8(entry),
 		ExitPrice:  helpers.Round8(exit),
@@ -336,13 +321,13 @@ func spotOrderFromLeg(leg helpers.SpotLeg, profit float64) domain.Order {
 	}
 }
 
-func syntheticSpotOrder(side string, qty, px float64, at time.Time, profit float64) domain.Order {
+func syntheticSpotOrder(qty, px float64, at time.Time) domain.Order {
 	id, _ := uuid.NewV7()
 	return domain.Order{
 		ID:            id,
 		Type:          "MARKET",
-		Status:        "FILLED",
-		Side:          side,
+		Status:        helpers.OrderStatusSynthetic,
+		Side:          "BUY",
 		Amount:        helpers.Round8(qty),
 		AmountFilled:  helpers.Round8(qty),
 		AveragePrice:  helpers.Round8(px),
@@ -350,10 +335,9 @@ func syntheticSpotOrder(side string, qty, px float64, at time.Time, profit float
 		UpdatedAt:     at,
 		Trade: domain.Trade{
 			OrderID: id,
-			Side:    side,
+			Side:    "BUY",
 			Price:   helpers.Round8(px),
 			Amount:  helpers.Round8(qty),
-			Profit:  helpers.Round8(profit),
 			DoneAt:  at,
 		},
 	}

@@ -333,7 +333,7 @@ func (d *Dataset) loadSpotBills() error {
 	}
 	from := d.windowMs
 	if d.spotHistoryCursorMs > 0 {
-		if dayStart := d.spotHistoryCursorMs - d.spotHistoryCursorMs%dayMs; dayStart > from {
+		if dayStart := dayStartMs(d.spotHistoryCursorMs); dayStart > from {
 			from = dayStart
 		}
 	}

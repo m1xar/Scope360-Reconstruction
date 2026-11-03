@@ -1,8 +1,9 @@
 package helpers
 
-import "strconv"
-
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 type SpotLeg struct {
 	Asset    string

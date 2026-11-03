@@ -11,7 +11,6 @@ type Instrument struct {
 	CtValCcy string `json:"ctValCcy"`
 	State    string `json:"state"`
 	MinSz    string `json:"minSz"`
-	LotSz    string `json:"lotSz"`
 	ExpTime  string `json:"expTime"`
 }
 

@@ -62,19 +62,6 @@ func Sync(
 	return out, nil
 }
 
-func GetSpotPositions(
-	client *resty.Client,
-	creds okxclient.Credentials,
-	baseURL string,
-	days int,
-) ([]domain.Position, []domain.OpenPosition, error) {
-	d, err := load(client, creds, baseURL, days, scope.Spot)
-	if err != nil {
-		return nil, nil, err
-	}
-	return d.SpotPositions()
-}
-
 // SpotHistory carries spot records the caller already persisted from earlier
 // syncs; they are merged with the fetch window before reconstruction.
 type SpotHistory struct {
