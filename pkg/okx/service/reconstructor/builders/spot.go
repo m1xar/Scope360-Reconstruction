@@ -3,6 +3,7 @@ package builders
 import (
 	"math"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,30 +13,29 @@ import (
 
 const spotDustUSD = 0.10
 
-// BuildSpotPositions reconstructs one lot per asset: the lot opens with the
+// BuildSpotPositions reconstructs the spot history of every asset as lots and
+// groups all lots of an asset into a single position. A lot opens with the
 // first buy (or a synthetic basis when history starts mid-lot), absorbs every
 // buy and sell as an execution and closes when the remainder is dust: below
 // the instrument's minimum order size, under spotDustUSD or effectively zero.
-// A closed lot is a closed position with volume-weighted entry/exit prices;
-// the live lot is the open position.
-func BuildSpotPositions(legs []helpers.SpotLeg, holdings []helpers.SpotHolding, windowStart time.Time, priceAt helpers.PriceAt, minSizes map[string]float64, adjustments []helpers.SpotAdjustment) ([]domain.Position, []domain.OpenPosition) {
-	return buildSpot(legs, holdings, windowStart, priceAt, minSizes, adjustments, false)
-}
-
-// BuildSpotAssetPositions reconstructs the lots exactly like BuildSpotPositions
-// and then groups every lot of an asset into a single position. Open or closed
-// is decided by the live balance alone. An asset that is still held becomes
-// one open position carrying every execution of all its lots, the realized pnl of all sells so far and the entry
-// price of the live lot. An asset that is no longer held becomes one closed
-// position over all its lots: volume-weighted entry/exit, summed pnl and fees,
-// opened at the first lot's start and closed at the last sell; buys whose units
-// left without a sell stay among its executions. Each sell keeps its own
-// realized pnl in Trade.Profit.
-func BuildSpotAssetPositions(legs []helpers.SpotLeg, holdings []helpers.SpotHolding, windowStart time.Time, priceAt helpers.PriceAt, minSizes map[string]float64, adjustments []helpers.SpotAdjustment) ([]domain.Position, []domain.OpenPosition) {
-	return buildSpot(legs, holdings, windowStart, priceAt, minSizes, adjustments, true)
-}
-
-func buildSpot(legs []helpers.SpotLeg, holdings []helpers.SpotHolding, windowStart time.Time, priceAt helpers.PriceAt, minSizes map[string]float64, adjustments []helpers.SpotAdjustment, group bool) ([]domain.Position, []domain.OpenPosition) {
+//
+// Open or closed is decided by the live balance alone. An asset that is still
+// held becomes one open position carrying every execution of all its lots, the
+// realized pnl of all sells so far and the entry price of the live lot. An
+// asset that is no longer held becomes one closed position over all its lots:
+// volume-weighted entry/exit, summed pnl and fees, opened at the first lot's
+// start and closed at the last sell; buys whose units left without a sell stay
+// among its executions. Each sell keeps its own realized pnl in Trade.Profit.
+//
+// Every balance adjustment is replayed as an execution on its day (see
+// spotAdjustmentLeg) with status helpers.OrderStatusAdjustment and the
+// adjustment Key as exchange order id. Only what those executions still leave
+// unexplained becomes a helpers.OrderStatusSynthetic buy: at the window start
+// for the opening inventory, or at a sell that would otherwise run short. Such
+// synthetics carry helpers.SpotSyntheticKey as exchange order id. The open
+// quantity never exceeds the live balance. now caps adjustment sells of the
+// current day so no position closes in the future.
+func BuildSpotPositions(legs []helpers.SpotLeg, holdings []helpers.SpotHolding, windowStart, now time.Time, priceAt helpers.PriceAt, minSizes map[string]float64, adjustments []helpers.SpotAdjustment) ([]domain.Position, []domain.OpenPosition) {
 	byAsset := map[string][]helpers.SpotLeg{}
 	for _, leg := range legs {
 		if helpers.IsStableAsset(leg.Asset) {
@@ -43,19 +43,17 @@ func buildSpot(legs []helpers.SpotLeg, holdings []helpers.SpotHolding, windowSta
 		}
 		byAsset[leg.Asset] = append(byAsset[leg.Asset], leg)
 	}
-	adjusted := map[string]float64{}
 	for _, adj := range adjustments {
-		adjusted[adj.Asset] += adj.Qty
+		if adj.Asset == "" || adj.Qty == 0 || helpers.IsStableAsset(adj.Asset) {
+			continue
+		}
+		byAsset[adj.Asset] = append(byAsset[adj.Asset], spotAdjustmentLeg(adj, priceAt, windowStart, now))
 	}
 	held := map[string]helpers.SpotHolding{}
-	explained := map[string]float64{}
 	for _, h := range holdings {
 		if helpers.IsStableAsset(h.Asset) {
 			continue
 		}
-		spot := math.Max(h.Qty-adjusted[h.Asset], 0)
-		explained[h.Asset] = spot
-		h.Qty = math.Min(h.Qty, spot)
 		held[h.Asset] = h
 		if _, ok := byAsset[h.Asset]; !ok && h.Qty*h.PriceUSD >= spotDustUSD {
 			byAsset[h.Asset] = nil
@@ -71,14 +69,8 @@ func buildSpot(legs []helpers.SpotLeg, holdings []helpers.SpotHolding, windowSta
 	var closed []domain.Position
 	var open []domain.OpenPosition
 	for _, asset := range assets {
-		lots := buildSpotLots(asset, byAsset[asset], held[asset], explained[asset], windowStart, priceAt, minSizes[asset])
-		var c []domain.Position
-		var o *domain.OpenPosition
-		if group {
-			c, o = lots.grouped(asset)
-		} else {
-			c, o = lots.positions(asset)
-		}
+		lots := buildSpotLots(asset, byAsset[asset], held[asset], windowStart, priceAt, minSizes[asset])
+		c, o := lots.grouped(asset)
 		closed = append(closed, c...)
 		if o != nil {
 			open = append(open, *o)
@@ -126,32 +118,20 @@ func (lot spotLot) market(asset string) (pair, symbol string) {
 	return asset + quote, symbol
 }
 
-// spotAssetLots is the lot reconstruction of one asset: the closed lots that
-// realized at least one sell, in chronological order, the closed lots whose
-// units left without a sell, and the live lot with its remaining balance,
-// entry price and market price when the asset is held.
+// spotAssetLots is the lot reconstruction of one asset: every finished lot
+// that holds at least one execution, in chronological order, and the live lot
+// with its remaining balance, entry price and market price when the asset is
+// held.
 type spotAssetLots struct {
-	closed []spotLot
-	stray  []spotLot
+	lots   []spotLot
 	open   *spotLot
 	amount float64
 	entry  float64
 	price  float64
 }
 
-func (l spotAssetLots) positions(asset string) ([]domain.Position, *domain.OpenPosition) {
-	closed := make([]domain.Position, 0, len(l.closed))
-	for _, lot := range l.closed {
-		closed = append(closed, spotClosedPosition(asset, lot))
-	}
-	if l.open == nil {
-		return closed, nil
-	}
-	return closed, l.openPosition(asset, *l.open)
-}
-
 func (l spotAssetLots) grouped(asset string) ([]domain.Position, *domain.OpenPosition) {
-	lots := append(append([]spotLot(nil), l.closed...), l.stray...)
+	lots := append([]spotLot(nil), l.lots...)
 	if l.open != nil {
 		lots = append(lots, *l.open)
 	}
@@ -194,8 +174,11 @@ func (l spotAssetLots) openPosition(asset string, lot spotLot) *domain.OpenPosit
 
 // mergeSpotLots folds the lots of one asset into a single lot: executions of
 // all lots in time order, summed fees, sold quantity, proceeds and realized
-// pnl, the earliest start, the latest sell and the latest traded market.
+// pnl, the earliest start, the latest sell and the market of the latest lot
+// (by start) that traded one.
 func mergeSpotLots(lots []spotLot) spotLot {
+	lots = append([]spotLot(nil), lots...)
+	sort.SliceStable(lots, func(i, j int) bool { return lots[i].start.Before(lots[j].start) })
 	var merged spotLot
 	for _, lot := range lots {
 		if !lot.start.IsZero() && (merged.start.IsZero() || lot.start.Before(merged.start)) {
@@ -220,25 +203,61 @@ func mergeSpotLots(lots []spotLot) spotLot {
 	return merged
 }
 
-func buildSpotLots(asset string, legs []helpers.SpotLeg, holding helpers.SpotHolding, explained float64, windowStart time.Time, priceAt helpers.PriceAt, minSize float64) spotAssetLots {
+// spotAdjustmentLeg turns the net balance change of one asset and UTC day into
+// an execution at that day's USD price: a gain is a buy at the start of the
+// day (00:00:00.000 UTC), a loss a sell at its end (23:59:59.999 UTC), so the
+// fills and transfers of that day never run short because of it. A loss on
+// the current day is placed at now, so no position closes in the future, and
+// no leg is placed before the window start.
+func spotAdjustmentLeg(adj helpers.SpotAdjustment, priceAt helpers.PriceAt, windowStart, now time.Time) helpers.SpotLeg {
+	day := helpers.SpotDayStart(adj.Ts)
+	leg := helpers.SpotLeg{
+		Asset:      adj.Asset,
+		OrdId:      adj.Key(),
+		OrdType:    "market",
+		Side:       "buy",
+		Qty:        adj.Qty,
+		Ts:         day,
+		Adjustment: true,
+	}
+	if adj.Qty < 0 {
+		leg.Side, leg.Qty = "sell", -adj.Qty
+		leg.Ts = day + helpers.SpotDayMs - 1
+		if nowMs := now.UnixMilli(); !now.IsZero() && nowMs > day && nowMs < leg.Ts {
+			leg.Ts = nowMs
+		}
+	}
+	if start := windowStart.UnixMilli(); !windowStart.IsZero() && leg.Ts < start {
+		leg.Ts = start
+	}
+	if priceAt != nil {
+		if px, ok := priceAt(adj.Asset, leg.Ts); ok {
+			leg.PxUSD = px
+		}
+	}
+	return leg
+}
+
+func buildSpotLots(asset string, legs []helpers.SpotLeg, holding helpers.SpotHolding, windowStart time.Time, priceAt helpers.PriceAt, minSize float64) spotAssetLots {
 	sort.SliceStable(legs, func(i, j int) bool { return legs[i].Ts < legs[j].Ts })
 
 	var buyQty, buyCost, sellQty float64
 	for _, leg := range legs {
 		if leg.Side == "buy" {
-			buyQty += leg.Qty
-			buyCost += leg.Qty * leg.PxUSD
+			buyQty += leg.Qty - leg.FeeBase
+			buyCost += (leg.Qty - leg.FeeBase) * leg.PxUSD
 		} else {
 			sellQty += leg.Qty
 		}
 	}
 
 	balance := holding.Qty
-	eps := math.Max(math.Max(balance, explained), buyQty) * 1e-9
+	eps := math.Max(balance, buyQty) * 1e-9
 
 	var inv spotInventory
 	var lot spotLot
 	var out spotAssetLots
+	syntheticKeys := map[string]int{}
 
 	syntheticPrice := func(qty float64) float64 {
 		px := holding.AvgPx
@@ -257,19 +276,22 @@ func buildSpotLots(asset string, legs []helpers.SpotLeg, holding helpers.SpotHol
 		}
 		return px
 	}
-	addSynthetic := func(qty float64, at time.Time) {
-		px := syntheticPrice(qty)
+	addSynthetic := func(qty, px float64, at time.Time) {
+		if px <= 0 {
+			px = syntheticPrice(qty)
+		}
 		inv.qty += qty
 		inv.cost += qty * px
 		if lot.start.IsZero() {
 			lot.start = at
 		}
-		lot.orders = append(lot.orders, syntheticSpotOrder(qty, px, at))
-	}
-	openLot := func(at time.Time) {
-		if lot.start.IsZero() {
-			lot.start = at
+		key := helpers.SpotSyntheticKey(asset, at.UnixMilli())
+		n := syntheticKeys[key]
+		syntheticKeys[key] = n + 1
+		if n > 0 {
+			key += "#" + strconv.Itoa(n)
 		}
+		lot.orders = append(lot.orders, syntheticSpotOrder(key, qty, px, at))
 	}
 	dust := func(qty float64) bool {
 		if qty <= eps {
@@ -281,10 +303,8 @@ func buildSpotLots(asset string, legs []helpers.SpotLeg, holding helpers.SpotHol
 		return holding.PriceUSD > 0 && qty*holding.PriceUSD < spotDustUSD
 	}
 	closeLot := func() {
-		if lot.sellQty > 0 {
-			out.closed = append(out.closed, lot)
-		} else if len(lot.orders) > 0 {
-			out.stray = append(out.stray, lot)
+		if len(lot.orders) > 0 {
+			out.lots = append(out.lots, lot)
 		}
 		if inv.qty <= eps {
 			inv = spotInventory{}
@@ -292,28 +312,40 @@ func buildSpotLots(asset string, legs []helpers.SpotLeg, holding helpers.SpotHol
 		lot = spotLot{}
 	}
 
-	if missing := explained - buyQty + sellQty; missing > eps {
-		addSynthetic(missing, windowStart)
+	if missing := balance - buyQty + sellQty; missing > eps {
+		addSynthetic(missing, 0, windowStart)
 	}
 
 	for _, leg := range legs {
 		at := time.UnixMilli(leg.Ts).UTC()
-		openLot(at)
+		if lot.start.IsZero() {
+			lot.start = at
+		}
 		if leg.Quote != "" {
 			lot.quote, lot.instId = leg.Quote, leg.InstId
 		}
 		fee := helpers.SpotFeeUSD(leg)
 		if leg.Side == "buy" {
-			inv.qty += leg.Qty
-			inv.cost += leg.Qty * leg.PxUSD
+			if leg.PxUSD <= 0 {
+				leg.PxUSD = firstPositive(inv.avg(), holding.AvgPx, holding.PriceUSD)
+			}
+			inv.qty += leg.Qty - leg.FeeBase
+			inv.cost += (leg.Qty - leg.FeeBase) * leg.PxUSD
 			lot.buyFee += fee
 			lot.orders = append(lot.orders, spotOrderFromLeg(leg, 0))
 			continue
 		}
 		if shortfall := leg.Qty - inv.qty; shortfall > eps {
-			addSynthetic(shortfall, at)
+			px := leg.PxUSD
+			if px <= 0 && priceAt != nil {
+				px, _ = priceAt(asset, leg.Ts)
+			}
+			addSynthetic(shortfall, px, at)
 		}
 		avg := inv.avg()
+		if leg.PxUSD <= 0 {
+			leg.PxUSD = firstPositive(avg, holding.PriceUSD)
+		}
 		realized := (leg.PxUSD - avg) * leg.Qty
 		inv.qty -= leg.Qty
 		inv.cost -= avg * leg.Qty
@@ -337,11 +369,6 @@ func buildSpotLots(asset string, legs []helpers.SpotLeg, holding helpers.SpotHol
 		closeLot()
 		return out
 	}
-	if inv.qty <= eps {
-		lot = spotLot{}
-		addSynthetic(balance, windowStart)
-	}
-	openLot(windowStart)
 
 	entry := inv.avg()
 	if entry <= 0 {
@@ -401,8 +428,11 @@ func spotOrderFromLeg(leg helpers.SpotLeg, profit float64) domain.Order {
 	px := helpers.Round8(leg.PxUSD)
 	doneAt := time.UnixMilli(leg.Ts).UTC()
 	status := "FILLED"
-	if leg.Transfer {
+	switch {
+	case leg.Transfer:
 		status = helpers.OrderStatusTransfer
+	case leg.Adjustment:
+		status = helpers.OrderStatusAdjustment
 	}
 	return domain.Order{
 		ID:              id,
@@ -427,18 +457,28 @@ func spotOrderFromLeg(leg helpers.SpotLeg, profit float64) domain.Order {
 	}
 }
 
-func syntheticSpotOrder(qty, px float64, at time.Time) domain.Order {
+func firstPositive(values ...float64) float64 {
+	for _, v := range values {
+		if v > 0 {
+			return v
+		}
+	}
+	return 0
+}
+
+func syntheticSpotOrder(key string, qty, px float64, at time.Time) domain.Order {
 	id, _ := uuid.NewV7()
 	return domain.Order{
-		ID:            id,
-		Type:          "MARKET",
-		Status:        helpers.OrderStatusSynthetic,
-		Side:          "BUY",
-		Amount:        helpers.Round8(qty),
-		AmountFilled:  helpers.Round8(qty),
-		AveragePrice:  helpers.Round8(px),
-		OriginalPrice: helpers.Round8(px),
-		UpdatedAt:     at,
+		ID:              id,
+		ExchangeOrderID: key,
+		Type:            "MARKET",
+		Status:          helpers.OrderStatusSynthetic,
+		Side:            "BUY",
+		Amount:          helpers.Round8(qty),
+		AmountFilled:    helpers.Round8(qty),
+		AveragePrice:    helpers.Round8(px),
+		OriginalPrice:   helpers.Round8(px),
+		UpdatedAt:       at,
 		Trade: domain.Trade{
 			OrderID: id,
 			Side:    "BUY",

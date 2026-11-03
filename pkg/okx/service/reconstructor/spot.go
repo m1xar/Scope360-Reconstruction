@@ -7,11 +7,9 @@ import (
 	"sync"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/m1xar/scope360-reconstruction/pkg/domain"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/executors"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/connector/okx/models"
 	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/helpers"
-	"github.com/m1xar/scope360-reconstruction/pkg/okx/service/reconstructor/workers"
 )
 
 type usdPricer struct {
@@ -187,13 +185,9 @@ func transferLegs(bills []models.Bill, pricer *usdPricer) []helpers.SpotLeg {
 	return legs
 }
 
-const dayMs = int64(24 * 60 * 60 * 1000)
-
-func dayStartMs(ts int64) int64 { return ts - ts%dayMs }
-
 // spotAdjustments aggregates per asset and UTC day every balance change that
-// is neither a cash spot fill nor a transfer, so option premiums, deliveries
-// and conversions explain the gap between spot fills and the live balance.
+// is neither a cash spot fill nor a transfer (option premiums, deliveries,
+// conversions); the builders replay each one as a synthetic execution on its day.
 func spotAdjustments(bills []models.Bill) []helpers.SpotAdjustment {
 	byKey := map[string]*helpers.SpotAdjustment{}
 	for _, b := range bills {
@@ -208,7 +202,7 @@ func spotAdjustments(bills []models.Bill) []helpers.SpotAdjustment {
 			continue
 		}
 		ts := helpers.MustInt64(b.Ts)
-		adj := helpers.SpotAdjustment{Asset: b.Ccy, Ts: dayStartMs(ts)}
+		adj := helpers.SpotAdjustment{Asset: b.Ccy, Ts: helpers.SpotDayStart(ts)}
 		key := adj.Key()
 		if cur, ok := byKey[key]; ok {
 			cur.Qty += chg
@@ -261,46 +255,4 @@ func spotHoldings(balance models.Balance) []helpers.SpotHolding {
 		})
 	}
 	return out
-}
-
-func excursionMarket(symbol string) string {
-	parts := strings.SplitN(symbol, "-", 2)
-	if len(parts) == 2 && helpers.IsStableAsset(parts[1]) {
-		return symbol
-	}
-	return parts[0] + "-USDT"
-}
-
-func applySpotExcursions(client *resty.Client, baseURL string, positions []domain.Position) {
-	requests := make(chan helpers.CandleRequest, defaultCandleWorkers)
-	workers.StartCandleWorkers(client, baseURL, requests, defaultCandleWorkers)
-
-	type pending struct {
-		idx     int
-		replyCh chan helpers.CandleResponse
-	}
-	queue := make([]pending, 0, len(positions))
-	for i, pos := range positions {
-		if pos.CreatedAt.IsZero() || pos.ClosedAt == nil || !pos.ClosedAt.After(pos.CreatedAt) {
-			continue
-		}
-		replyCh := make(chan helpers.CandleResponse, 1)
-		requests <- helpers.CandleRequest{
-			InstId:  excursionMarket(pos.Symbol),
-			Bar:     "1m",
-			StartMs: pos.CreatedAt.UnixMilli(),
-			EndMs:   pos.ClosedAt.UnixMilli(),
-			ReplyCh: replyCh,
-		}
-		queue = append(queue, pending{idx: i, replyCh: replyCh})
-	}
-	close(requests)
-
-	for _, p := range queue {
-		resp := <-p.replyCh
-		if resp.Err == nil {
-			high, low := helpers.GetHighLow(resp.Candles)
-			helpers.ApplyMAEMFE(&positions[p.idx], high, low)
-		}
-	}
 }

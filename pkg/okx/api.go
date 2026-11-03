@@ -31,24 +31,24 @@ func load(client *resty.Client, creds okxclient.Credentials, baseURL string, day
 	return reconstructor.Load(client, baseURL, helpers.CutoffFromDays(days), s)
 }
 
+// Sync returns derivatives positions, balances, transactions and fundings.
+// Spot is not part of it: spot positions are rebuilt from the persisted spot
+// history, so they come from GetSpotSnapshot.
 func Sync(
 	client *resty.Client,
 	creds okxclient.Credentials,
 	baseURL string,
 	days int,
 ) (*domain.Sync, error) {
-	d, err := load(client, creds, baseURL, days, scope.All)
+	d, err := load(client, creds, baseURL, days, scope.All&^scope.Spot)
 	if err != nil {
 		return nil, err
 	}
 
 	out := &domain.Sync{}
-	var spotClosed []domain.Position
-	var spotOpen []domain.OpenPosition
 	err = parallel.Run(
 		func() (err error) { out.Positions, err = d.ClosedPositions(); return err },
 		func() (err error) { out.OpenPositions, err = d.OpenPositions(); return err },
-		func() (err error) { spotClosed, spotOpen, err = d.SpotPositions(); return err },
 		func() error { out.BalanceSnapshots = d.BalanceSnapshots(); return nil },
 		func() error { out.Transactions = d.Transactions(); return nil },
 		func() error { out.Fundings = d.Fundings(); return nil },
@@ -56,8 +56,6 @@ func Sync(
 	if err != nil {
 		return nil, err
 	}
-	out.Positions = append(out.Positions, spotClosed...)
-	out.OpenPositions = append(out.OpenPositions, spotOpen...)
 	out.CurrentBalance = d.CurrentBalance()
 	return out, nil
 }
@@ -83,6 +81,13 @@ type SpotSnapshot struct {
 	WindowStart time.Time
 }
 
+// GetSpotSnapshot rebuilds the spot positions from the fetch window merged
+// with history, with the lots of every asset grouped into a single position:
+// Open holds one position per asset that is still held (all executions,
+// realized pnl of every sell so far, entry price of the live lot) and Closed
+// one position per asset that is no longer held (all executions, summed pnl,
+// volume-weighted entry/exit over all lots). Closed positions carry no
+// MAE/MFE. See builders.BuildSpotPositions for the synthetic order contract.
 func GetSpotSnapshot(
 	client *resty.Client,
 	creds okxclient.Credentials,
@@ -90,39 +95,12 @@ func GetSpotSnapshot(
 	days int,
 	history SpotHistory,
 ) (*SpotSnapshot, error) {
-	return spotSnapshot(client, creds, baseURL, days, history, (*reconstructor.Dataset).SpotPositions)
-}
-
-// GetSpotAssetSnapshot is GetSpotSnapshot with the lots of every asset grouped
-// into a single position: Open holds one position per asset that is still
-// held (all executions, realized pnl of every sell so far, entry price of the
-// live lot) and Closed one position per asset that is no longer held (all
-// executions, summed pnl, volume-weighted entry/exit over all lots). Closed
-// positions carry no MAE/MFE.
-func GetSpotAssetSnapshot(
-	client *resty.Client,
-	creds okxclient.Credentials,
-	baseURL string,
-	days int,
-	history SpotHistory,
-) (*SpotSnapshot, error) {
-	return spotSnapshot(client, creds, baseURL, days, history, (*reconstructor.Dataset).SpotAssetPositions)
-}
-
-func spotSnapshot(
-	client *resty.Client,
-	creds okxclient.Credentials,
-	baseURL string,
-	days int,
-	history SpotHistory,
-	build func(*reconstructor.Dataset) ([]domain.Position, []domain.OpenPosition, error),
-) (*SpotSnapshot, error) {
 	d, err := load(client, creds, baseURL, days, scope.Spot)
 	if err != nil {
 		return nil, err
 	}
 	d.AddSpotHistory(history.Orders, history.Bills, history.Adjustments, history.BillsCursor)
-	closed, open, err := build(d)
+	closed, open, err := d.SpotPositions()
 	if err != nil {
 		return nil, err
 	}
