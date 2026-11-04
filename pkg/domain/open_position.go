@@ -19,5 +19,4 @@ type OpenPosition struct {
 	RealizedPnl  float64
 	OpenTime     time.Time
 	Orders       []Order
-	IsSpot       bool
 }

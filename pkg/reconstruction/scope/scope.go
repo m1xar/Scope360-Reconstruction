@@ -8,9 +8,8 @@ const (
 	Balances
 	Transactions
 	Fundings
-	Spot
 
-	All = Closed | Open | Balances | Transactions | Fundings | Spot
+	All = Closed | Open | Balances | Transactions | Fundings
 )
 
 func (s Scope) Has(x Scope) bool { return s&x == x }
