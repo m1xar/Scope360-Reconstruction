@@ -1,8 +1,6 @@
 package reconstructor
 
 import (
-	"fmt"
-	"sort"
 	"sync"
 	"time"
 
@@ -23,7 +21,6 @@ type Dataset struct {
 	cutoff   *time.Time
 	scope    scope.Scope
 	windowMs int64
-	now      time.Time
 
 	closed      []models.ClosedPosition
 	open        []models.OpenPosition
@@ -35,17 +32,6 @@ type Dataset struct {
 	ordersOK bool
 	algos    []models.AlgoOrder
 
-	spotOrders          []models.Order
-	spotOK              bool
-	spotBills           []models.Bill
-	spotHistoryBills    []models.Bill
-	spotAdjustments     []helpers.SpotAdjustment
-	spotHistoryAdjust   []helpers.SpotAdjustment
-	spotBillsCursorMs   int64
-	spotHistoryCursorMs int64
-	spotInstruments     []models.Instrument
-	spotHistoryMs       int64
-
 	bills   []models.Bill
 	billsOK bool
 	balance models.Balance
@@ -56,7 +42,7 @@ type Dataset struct {
 }
 
 func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope) (*Dataset, error) {
-	d := &Dataset{client: client, baseURL: baseURL, cutoff: cutoff, scope: s, now: time.Now().UTC()}
+	d := &Dataset{client: client, baseURL: baseURL, cutoff: cutoff, scope: s}
 	cutoffMs := window.StartMs(cutoff)
 	d.windowMs = cutoffMs
 	if d.windowMs <= 0 {
@@ -81,7 +67,7 @@ func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope
 			d.open = open
 			return nil
 		}),
-		when(s.Any(scope.Closed|scope.Balances|scope.Spot), func() error {
+		when(s.Any(scope.Closed|scope.Balances), func() error {
 			bal, err := executors.FetchBalance(client, baseURL)
 			if err != nil {
 				balErr = err
@@ -90,19 +76,11 @@ func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope
 			d.balance, d.balOK = bal, true
 			return nil
 		}),
-		when(s.Has(scope.Spot), func() error {
-			orders, err := executors.FetchAllOrders(client, baseURL, "SPOT", d.windowMs)
-			if err != nil {
-				return err
-			}
-			d.spotOrders, d.spotOK = orders, true
-			return nil
-		}),
 	)
 	if err != nil {
 		return nil, err
 	}
-	if !d.balOK && s.Any(scope.Balances|scope.Spot) {
+	if !d.balOK && s.Has(scope.Balances) {
 		return nil, balErr
 	}
 
@@ -126,14 +104,6 @@ func Load(client *resty.Client, baseURL string, cutoff *time.Time, s scope.Scope
 			if err == nil {
 				d.algos = algos
 			}
-			return nil
-		}),
-		when(s.Has(scope.Spot), func() error {
-			instruments, err := executors.FetchInstrumentsByType(client, baseURL, "SPOT")
-			if err != nil {
-				return err
-			}
-			d.spotInstruments = instruments
 			return nil
 		}),
 		when(billsWanted, func() error {
@@ -293,143 +263,6 @@ func (d *Dataset) OpenPositions() ([]domain.OpenPosition, error) {
 		enrichOpenPositionOrders(d.orders, d.fills, d.fillsErr, d.open, positions, d.instruments)
 	}
 	return positions, nil
-}
-
-// AddSpotHistory merges previously known spot orders, transfer bills and
-// balance adjustments into the dataset so lots are rebuilt from the full known
-// history, not only from the fetch window. Fresh exchange records win over
-// historical duplicates; billsCursor is the instant up to which bills were
-// already examined, so the next bill fetch starts from that day.
-func (d *Dataset) AddSpotHistory(orders []models.Order, bills []models.Bill, adjustments []helpers.SpotAdjustment, billsCursor time.Time) {
-	seen := make(map[string]bool, len(d.spotOrders))
-	for _, o := range d.spotOrders {
-		seen[o.OrdId] = true
-	}
-	for _, o := range orders {
-		if o.OrdId == "" || seen[o.OrdId] {
-			continue
-		}
-		seen[o.OrdId] = true
-		d.spotOrders = append(d.spotOrders, o)
-		d.extendSpotHistory(helpers.MustInt64(o.FillTime), helpers.MustInt64(o.UTime), helpers.MustInt64(o.CTime))
-	}
-	for _, b := range bills {
-		if b.BillId == "" {
-			continue
-		}
-		d.spotHistoryBills = append(d.spotHistoryBills, b)
-		d.extendSpotHistory(helpers.MustInt64(b.Ts))
-	}
-	d.spotHistoryAdjust = append(d.spotHistoryAdjust, adjustments...)
-	if !billsCursor.IsZero() {
-		d.spotHistoryCursorMs = billsCursor.UnixMilli()
-	}
-}
-
-// loadSpotBills fetches every bill since the later of the window start and the
-// day of the previous cursor, then derives transfers and balance adjustments.
-func (d *Dataset) loadSpotBills() error {
-	if d.spotBillsCursorMs > 0 {
-		return nil
-	}
-	from := d.windowMs
-	if d.spotHistoryCursorMs > 0 {
-		if dayStart := helpers.SpotDayStart(d.spotHistoryCursorMs); dayStart > from {
-			from = dayStart
-		}
-	}
-	cursor := d.now.UnixMilli()
-	var bills []models.Bill
-	if d.scope.Has(scope.Transactions) && d.billsOK {
-		for _, b := range d.bills {
-			if helpers.MustInt64(b.Ts) >= from {
-				bills = append(bills, b)
-			}
-		}
-	} else {
-		fetched, err := executors.FetchAllBills(d.client, d.baseURL, "", from, "")
-		if err != nil {
-			return err
-		}
-		bills = fetched
-	}
-	fresh := make(map[string]bool, len(bills))
-	for _, b := range bills {
-		fresh[b.BillId] = true
-	}
-	d.spotBills = bills
-	for _, b := range d.spotHistoryBills {
-		if !fresh[b.BillId] {
-			d.spotBills = append(d.spotBills, b)
-		}
-	}
-	adjustments := spotAdjustments(bills)
-	freshDays := make(map[string]bool, len(adjustments))
-	for _, adj := range adjustments {
-		freshDays[adj.Key()] = true
-	}
-	for _, adj := range d.spotHistoryAdjust {
-		if adj.Ts >= from || freshDays[adj.Key()] {
-			continue
-		}
-		adjustments = append(adjustments, adj)
-	}
-	sort.SliceStable(adjustments, func(i, j int) bool {
-		if adjustments[i].Ts != adjustments[j].Ts {
-			return adjustments[i].Ts < adjustments[j].Ts
-		}
-		return adjustments[i].Asset < adjustments[j].Asset
-	})
-	d.spotAdjustments = adjustments
-	d.spotBillsCursorMs = cursor
-	return nil
-}
-
-func (d *Dataset) extendSpotHistory(timestamps ...int64) {
-	for _, ts := range timestamps {
-		if ts > 0 && (d.spotHistoryMs == 0 || ts < d.spotHistoryMs) {
-			d.spotHistoryMs = ts
-		}
-	}
-}
-
-// SpotWindowStart is the earliest instant covered by the spot reconstruction:
-// the fetch window or the oldest merged history record, whichever is earlier.
-func (d *Dataset) SpotWindowStart() time.Time {
-	start := d.windowMs
-	if d.spotHistoryMs > 0 && d.spotHistoryMs < start {
-		start = d.spotHistoryMs
-	}
-	return time.UnixMilli(start).UTC()
-}
-
-func (d *Dataset) SpotOrders() []models.Order { return d.spotOrders }
-
-func (d *Dataset) SpotBills() []models.Bill { return d.spotBills }
-
-func (d *Dataset) SpotAdjustments() []helpers.SpotAdjustment { return d.spotAdjustments }
-
-func (d *Dataset) SpotBillsCursor() time.Time {
-	if d.spotBillsCursorMs == 0 {
-		return time.Time{}
-	}
-	return time.UnixMilli(d.spotBillsCursorMs).UTC()
-}
-
-// SpotPositions reconstructs the spot lots and groups them into one position
-// per asset: open while the asset is held, closed otherwise. MAE/MFE are left
-// to the caller because a grouped position can span the whole history window.
-func (d *Dataset) SpotPositions() ([]domain.Position, []domain.OpenPosition, error) {
-	if !d.spotOK || !d.balOK {
-		return nil, nil, fmt.Errorf("okx: spot dataset not loaded")
-	}
-	if err := d.loadSpotBills(); err != nil {
-		return nil, nil, err
-	}
-	pricer := newUSDPricer(d.client, d.baseURL)
-	legs := append(spotLegs(d.spotOrders, pricer), transferLegs(d.spotBills, pricer)...)
-	closed, open := builders.BuildSpotPositions(legs, spotHoldings(d.balance), d.SpotWindowStart(), d.now, pricer.price, spotMinSizes(d.spotInstruments), d.spotAdjustments)
-	return closed, open, nil
 }
 
 func (d *Dataset) BalanceSnapshots() []domain.UserBalanceSnapshot {

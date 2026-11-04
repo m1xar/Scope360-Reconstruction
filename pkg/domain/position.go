@@ -33,5 +33,4 @@ type Position struct {
 	ClosedAt         *time.Time
 	Orders           []Order
 	BalanceInit      float64
-	IsSpot           bool
 }

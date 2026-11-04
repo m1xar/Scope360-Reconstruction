@@ -32,15 +32,13 @@ func load(client *resty.Client, creds okxclient.Credentials, baseURL string, day
 }
 
 // Sync returns derivatives positions, balances, transactions and fundings.
-// Spot is not part of it: spot positions are rebuilt from the persisted spot
-// history, so they come from GetSpotSnapshot.
 func Sync(
 	client *resty.Client,
 	creds okxclient.Credentials,
 	baseURL string,
 	days int,
 ) (*domain.Sync, error) {
-	d, err := load(client, creds, baseURL, days, scope.All&^scope.Spot)
+	d, err := load(client, creds, baseURL, days, scope.All)
 	if err != nil {
 		return nil, err
 	}
@@ -58,61 +56,6 @@ func Sync(
 	}
 	out.CurrentBalance = d.CurrentBalance()
 	return out, nil
-}
-
-// SpotHistory carries spot records the caller already persisted from earlier
-// syncs; they are merged with the fetch window before reconstruction.
-type SpotHistory struct {
-	Orders      []models.Order
-	Bills       []models.Bill
-	Adjustments []helpers.SpotAdjustment
-	BillsCursor time.Time
-}
-
-// SpotSnapshot is the reconstructed spot state plus the raw records it was
-// built from, so callers can persist them and feed them back next time.
-type SpotSnapshot struct {
-	Closed      []domain.Position
-	Open        []domain.OpenPosition
-	Orders      []models.Order
-	Bills       []models.Bill
-	Adjustments []helpers.SpotAdjustment
-	BillsCursor time.Time
-	WindowStart time.Time
-}
-
-// GetSpotSnapshot rebuilds the spot positions from the fetch window merged
-// with history, with the lots of every asset grouped into a single position:
-// Open holds one position per asset that is still held (all executions,
-// realized pnl of every sell so far, entry price of the live lot) and Closed
-// one position per asset that is no longer held (all executions, summed pnl,
-// volume-weighted entry/exit over all lots). Closed positions carry no
-// MAE/MFE. See builders.BuildSpotPositions for the synthetic order contract.
-func GetSpotSnapshot(
-	client *resty.Client,
-	creds okxclient.Credentials,
-	baseURL string,
-	days int,
-	history SpotHistory,
-) (*SpotSnapshot, error) {
-	d, err := load(client, creds, baseURL, days, scope.Spot)
-	if err != nil {
-		return nil, err
-	}
-	d.AddSpotHistory(history.Orders, history.Bills, history.Adjustments, history.BillsCursor)
-	closed, open, err := d.SpotPositions()
-	if err != nil {
-		return nil, err
-	}
-	return &SpotSnapshot{
-		Closed:      closed,
-		Open:        open,
-		Orders:      d.SpotOrders(),
-		Bills:       d.SpotBills(),
-		Adjustments: d.SpotAdjustments(),
-		BillsCursor: d.SpotBillsCursor(),
-		WindowStart: d.SpotWindowStart(),
-	}, nil
 }
 
 func GetClosedPositionByExactMatch(
