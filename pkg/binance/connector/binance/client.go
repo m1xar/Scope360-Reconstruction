@@ -5,14 +5,16 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/m1xar/scope360-reconstruction/pkg/clientstate"
+	"github.com/m1xar/scope360-reconstruction/pkg/clocksync"
 )
 
 const (
@@ -41,15 +43,23 @@ func isPublicPath(path string) bool {
 	return ok
 }
 
-var attached sync.Map
+// attached dedupes AttachAuth per client without keeping the client alive.
+var attached clientstate.Map[Credentials]
+
+// clock is shared: the offset belongs to the host clock, not to a client.
+var clock = clocksync.New(func() (int64, error) {
+	type serverTime struct {
+		ServerTime int64 `json:"serverTime"`
+	}
+	st, err := doGet[serverTime](NewBaseClient(), "/fapi/v1/time", nil, 1)
+	return st.ServerTime, err
+})
 
 func AttachAuth(client *resty.Client, creds Credentials) {
-	if prev, ok := attached.Load(client); ok && prev.(Credentials) == creds {
+	if prev, ok := attached.Load(client); ok && prev == creds {
 		return
 	}
 	attached.Store(client, creds)
-
-	offset := serverTimeOffset()
 
 	client.SetPreRequestHook(func(_ *resty.Client, req *http.Request) error {
 		req.Header.Set("X-MBX-APIKEY", creds.APIKey)
@@ -58,7 +68,7 @@ func AttachAuth(client *resty.Client, creds Credentials) {
 		}
 
 		q := req.URL.Query()
-		q.Set("timestamp", strconv.FormatInt(time.Now().UnixMilli()+offset, 10))
+		q.Set("timestamp", strconv.FormatInt(time.Now().UnixMilli()+clock.Get(), 10))
 		q.Set("recvWindow", strconv.Itoa(defaultRecvWindow))
 		raw := q.Encode()
 
@@ -77,19 +87,6 @@ func signRequest(secret, payload string) string {
 	h := hmac.New(sha256.New, []byte(secret))
 	h.Write([]byte(payload))
 	return hex.EncodeToString(h.Sum(nil))
-}
-
-func serverTimeOffset() int64 {
-	type serverTime struct {
-		ServerTime int64 `json:"serverTime"`
-	}
-	before := time.Now().UnixMilli()
-	st, err := DoGet[serverTime](NewBaseClient(), "/fapi/v1/time", nil, 1)
-	if err != nil || st.ServerTime == 0 {
-		return 0
-	}
-	after := time.Now().UnixMilli()
-	return st.ServerTime - (before+after)/2
 }
 
 type HTTPError struct {
@@ -116,7 +113,21 @@ type apiErrorBody struct {
 	Msg  string `json:"msg"`
 }
 
+// CodeTimestampOutOfWindow is returned for a timestamp outside recvWindow or ahead
+// of the server time by more than a second.
+const CodeTimestampOutOfWindow = -1021
+
 func DoGet[T any](client *resty.Client, path string, params map[string]string, weight int) (T, error) {
+	result, err := doGet[T](client, path, params, weight)
+	var httpErr *HTTPError
+	if err != nil && errors.As(err, &httpErr) && httpErr.Code == CodeTimestampOutOfWindow {
+		clock.Refresh()
+		return doGet[T](client, path, params, weight)
+	}
+	return result, err
+}
+
+func doGet[T any](client *resty.Client, path string, params map[string]string, weight int) (T, error) {
 	var zero T
 
 	Limiter.Acquire(weight)

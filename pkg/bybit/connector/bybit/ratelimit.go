@@ -25,31 +25,49 @@ type endpointBucket struct {
 	resetAt   time.Time
 }
 
+// RateLimiter follows Bybit's two limits: a per-IP request budget, and per-endpoint
+// limits that Bybit counts per UID, so endpoint buckets are kept per API key.
 type RateLimiter struct {
 	mu        sync.Mutex
-	endpoints map[string]*endpointBucket
+	endpoints map[bucketKey]*endpointBucket
 	counts    map[string]int
 	ipStamps  []time.Time
+	egressIPs int
 	requests  int
 	throttled int
+}
+
+type bucketKey struct {
+	apiKey string
+	path   string
 }
 
 var Limiter = NewRateLimiter()
 
 func NewRateLimiter() *RateLimiter {
 	return &RateLimiter{
-		endpoints: make(map[string]*endpointBucket),
+		endpoints: make(map[bucketKey]*endpointBucket),
 		counts:    make(map[string]int),
 	}
 }
 
-func (l *RateLimiter) Acquire(path string) {
+// SetEgressIPs tells the limiter that requests are spread evenly over n IPs (a
+// rotating proxy pool), so the process may spend n times the per-IP budget.
+func SetEgressIPs(n int) {
+	Limiter.mu.Lock()
+	defer Limiter.mu.Unlock()
+	Limiter.egressIPs = n
+}
+
+// Acquire waits for the IP budget and for the endpoint bucket of apiKey; public
+// endpoints pass an empty key.
+func (l *RateLimiter) Acquire(apiKey, path string) {
 	for {
 		l.mu.Lock()
 		now := time.Now()
 		wait := l.ipWait(now)
 		if wait == 0 {
-			wait = l.endpointWait(path, now)
+			wait = l.endpointWait(bucketKey{apiKey, path}, now)
 		}
 		if wait == 0 {
 			l.ipStamps = append(l.ipStamps, now)
@@ -69,22 +87,21 @@ func (l *RateLimiter) ipWait(now time.Time) time.Duration {
 		i++
 	}
 	l.ipStamps = l.ipStamps[i:]
-	if len(l.ipStamps) < ipSoftBudget {
+	if len(l.ipStamps) < ipSoftBudget*max(l.egressIPs, 1) {
 		return 0
 	}
 	return l.ipStamps[0].Add(ipWindow).Sub(now) + 10*time.Millisecond
 }
 
-func (l *RateLimiter) endpointWait(path string, now time.Time) time.Duration {
-	if isPublicPath(path) {
-		l.counts[path]++
+func (l *RateLimiter) endpointWait(key bucketKey, now time.Time) time.Duration {
+	l.counts[key.path]++
+	if isPublicPath(key.path) {
 		return 0
 	}
-	l.counts[path]++
-	b, ok := l.endpoints[path]
+	b, ok := l.endpoints[key]
 	if !ok {
 		b = &endpointBucket{limit: defaultEndpointLimit, remaining: defaultEndpointLimit}
-		l.endpoints[path] = b
+		l.endpoints[key] = b
 	}
 	if now.After(b.windowEnd) {
 		b.windowEnd = now.Add(time.Second)
@@ -100,7 +117,7 @@ func (l *RateLimiter) endpointWait(path string, now time.Time) time.Duration {
 	return 0
 }
 
-func (l *RateLimiter) Observe(path string, h http.Header) {
+func (l *RateLimiter) Observe(apiKey, path string, h http.Header) {
 	limit, limitOK := atoi(h.Get(headerLimit))
 	status, statusOK := atoi(h.Get(headerLimitStatus))
 	if !limitOK && !statusOK {
@@ -110,10 +127,11 @@ func (l *RateLimiter) Observe(path string, h http.Header) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	b, ok := l.endpoints[path]
+	key := bucketKey{apiKey, path}
+	b, ok := l.endpoints[key]
 	if !ok {
 		b = &endpointBucket{}
-		l.endpoints[path] = b
+		l.endpoints[key] = b
 	}
 	if limitOK && limit > 0 {
 		b.limit = limit
@@ -136,10 +154,10 @@ func (l *RateLimiter) Observe(path string, h http.Header) {
 	}
 }
 
-func (l *RateLimiter) ResetAt(path string) time.Time {
+func (l *RateLimiter) ResetAt(apiKey, path string) time.Time {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if b, ok := l.endpoints[path]; ok && !b.resetAt.IsZero() {
+	if b, ok := l.endpoints[bucketKey{apiKey, path}]; ok && !b.resetAt.IsZero() {
 		return b.resetAt
 	}
 	return time.Now().Add(time.Second)
@@ -161,8 +179,8 @@ func (l *RateLimiter) Limits() map[string]int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	out := make(map[string]int, len(l.endpoints))
-	for path, b := range l.endpoints {
-		out[path] = b.limit
+	for key, b := range l.endpoints {
+		out[key.path] = max(out[key.path], b.limit)
 	}
 	return out
 }

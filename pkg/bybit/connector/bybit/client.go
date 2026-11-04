@@ -9,11 +9,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/m1xar/scope360-reconstruction/pkg/clientstate"
+	"github.com/m1xar/scope360-reconstruction/pkg/clocksync"
 )
 
 const (
@@ -36,30 +36,38 @@ type Credentials struct {
 	Secret string
 }
 
-type authState struct {
-	creds  Credentials
-	offset atomic.Int64
-}
+// attached keeps each client's credentials without keeping the client alive; the
+// rate limiter keys its per-UID endpoint buckets by the API key.
+var attached clientstate.Map[Credentials]
 
-var attached sync.Map
+// clock is shared: the offset belongs to the host clock, not to a client.
+var clock = clocksync.New(func() (int64, error) {
+	st, err := doGet[serverTime](NewBaseClient(), "/v5/market/time", nil)
+	if err != nil {
+		return 0, err
+	}
+	if nano, convErr := strconv.ParseInt(st.TimeNano, 10, 64); convErr == nil && nano != 0 {
+		return nano / 1_000_000, nil
+	}
+	sec, err := strconv.ParseInt(st.TimeSecond, 10, 64)
+	return sec * 1000, err
+})
 
 func isPublicPath(path string) bool {
 	return strings.HasPrefix(path, publicPathPrefix)
 }
 
 func AttachAuth(client *resty.Client, creds Credentials) {
-	if prev, ok := attached.Load(client); ok && prev.(*authState).creds == creds {
+	if prev, ok := attached.Load(client); ok && prev == creds {
 		return
 	}
-	state := &authState{creds: creds}
-	state.offset.Store(serverTimeOffset())
-	attached.Store(client, state)
+	attached.Store(client, creds)
 
 	client.SetPreRequestHook(func(_ *resty.Client, req *http.Request) error {
 		if isPublicPath(req.URL.Path) {
 			return nil
 		}
-		ts := strconv.FormatInt(time.Now().UnixMilli()+state.offset.Load(), 10)
+		ts := strconv.FormatInt(time.Now().UnixMilli()+clock.Get(), 10)
 		req.Header.Set("X-BAPI-API-KEY", creds.APIKey)
 		req.Header.Set("X-BAPI-TIMESTAMP", ts)
 		req.Header.Set("X-BAPI-RECV-WINDOW", defaultRecvWindow)
@@ -83,30 +91,6 @@ func Sign(secret, timestamp, apiKey, recvWindow, query string) string {
 type serverTime struct {
 	TimeSecond string `json:"timeSecond"`
 	TimeNano   string `json:"timeNano"`
-}
-
-func serverTimeOffset() int64 {
-	before := time.Now().UnixMilli()
-	st, err := DoGet[serverTime](NewBaseClient(), "/v5/market/time", nil)
-	if err != nil {
-		return 0
-	}
-	after := time.Now().UnixMilli()
-	nano, convErr := strconv.ParseInt(st.TimeNano, 10, 64)
-	if convErr != nil || nano == 0 {
-		sec, secErr := strconv.ParseInt(st.TimeSecond, 10, 64)
-		if secErr != nil || sec == 0 {
-			return 0
-		}
-		nano = sec * 1_000_000_000
-	}
-	return nano/1_000_000 - (before+after)/2
-}
-
-func resyncTime(client *resty.Client) {
-	if v, ok := attached.Load(client); ok {
-		v.(*authState).offset.Store(serverTimeOffset())
-	}
 }
 
 type HTTPError struct {
@@ -149,7 +133,7 @@ func DoGet[T any](client *resty.Client, path string, params map[string]string) (
 	result, err := doGet[T](client, path, params)
 	var apiErr *APIError
 	if err != nil && asAPIError(err, &apiErr) && apiErr.Code == CodeTimestampOutOfWindow {
-		resyncTime(client)
+		clock.Refresh()
 		return doGet[T](client, path, params)
 	}
 	return result, err
@@ -166,7 +150,8 @@ func asAPIError(err error, target **APIError) bool {
 func doGet[T any](client *resty.Client, path string, params map[string]string) (T, error) {
 	var zero T
 
-	Limiter.Acquire(path)
+	creds, _ := attached.Load(client)
+	Limiter.Acquire(creds.APIKey, path)
 
 	req := client.R()
 	for k, v := range params {
@@ -178,7 +163,7 @@ func doGet[T any](client *resty.Client, path string, params map[string]string) (
 		return zero, err
 	}
 
-	Limiter.Observe(path, resp.Header())
+	Limiter.Observe(creds.APIKey, path, resp.Header())
 
 	body := resp.Body()
 	if resp.StatusCode() < http.StatusOK || resp.StatusCode() >= http.StatusMultipleChoices {
@@ -202,7 +187,7 @@ func doGet[T any](client *resty.Client, path string, params map[string]string) (
 	if env.RetCode != 0 {
 		apiErr := &APIError{Code: env.RetCode, Msg: env.RetMsg, Path: path}
 		if env.RetCode == CodeRateLimit {
-			apiErr.ResetAt = Limiter.ResetAt(path)
+			apiErr.ResetAt = Limiter.ResetAt(creds.APIKey, path)
 		}
 		return zero, apiErr
 	}
