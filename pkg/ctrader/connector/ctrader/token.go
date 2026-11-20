@@ -1,12 +1,19 @@
 package ctrader
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/go-resty/resty/v2"
 )
 
-const tokenURL = "https://openapi.ctrader.com/apps/token"
+var tokenURL = "https://openapi.ctrader.com/apps/token"
+
+// ErrTokenRefreshRejected marks a refresh cTrader refused (no refresh token, an OAuth
+// error, a 4xx or a response without an access token). The stored grant is no longer
+// usable and the user has to authorize the account again. Network failures and 5xx
+// responses are not wrapped with it.
+var ErrTokenRefreshRejected = errors.New("ctrader token refresh rejected")
 
 type TokenSet struct {
 	AccessToken  string
@@ -26,11 +33,13 @@ type tokenResponse struct {
 	TokenType2    string `json:"token_type"`
 	Error         string `json:"error"`
 	ErrorDescr    string `json:"error_description"`
+	ErrorCode     string `json:"errorCode"`
+	Description   string `json:"description"`
 }
 
 func (c *Client) RefreshToken() (TokenSet, error) {
 	if c.creds.RefreshToken == "" {
-		return TokenSet{}, fmt.Errorf("ctrader refresh token is empty")
+		return TokenSet{}, fmt.Errorf("%w: ctrader refresh token is empty", ErrTokenRefreshRejected)
 	}
 	httpClient := c.httpClient
 	if httpClient == nil {
@@ -47,11 +56,18 @@ func (c *Client) RefreshToken() (TokenSet, error) {
 	if err != nil {
 		return TokenSet{}, err
 	}
+	if out.Error == "" && out.ErrorCode != "" {
+		out.Error, out.ErrorDescr = out.ErrorCode, out.Description
+	}
 	if resp.IsError() || out.Error != "" {
-		if out.ErrorDescr != "" {
-			return TokenSet{}, fmt.Errorf("ctrader token refresh failed: %s: %s", out.Error, out.ErrorDescr)
+		var cause error = ErrTokenRefreshRejected
+		if out.Error == "" && resp.StatusCode() >= 500 {
+			cause = errors.New("ctrader token endpoint unavailable")
 		}
-		return TokenSet{}, fmt.Errorf("ctrader token refresh failed: http %d", resp.StatusCode())
+		if out.ErrorDescr != "" {
+			return TokenSet{}, fmt.Errorf("%w: ctrader token refresh failed: %s: %s", cause, out.Error, out.ErrorDescr)
+		}
+		return TokenSet{}, fmt.Errorf("%w: ctrader token refresh failed: http %d", cause, resp.StatusCode())
 	}
 	set := TokenSet{
 		AccessToken:  firstNonEmpty(out.AccessToken, out.AccessToken2),
@@ -60,7 +76,7 @@ func (c *Client) RefreshToken() (TokenSet, error) {
 		TokenType:    firstNonEmpty(out.TokenType, out.TokenType2),
 	}
 	if set.AccessToken == "" {
-		return TokenSet{}, fmt.Errorf("ctrader token refresh returned empty access token")
+		return TokenSet{}, fmt.Errorf("%w: ctrader token refresh returned empty access token", ErrTokenRefreshRejected)
 	}
 	if set.RefreshToken == "" {
 		set.RefreshToken = c.creds.RefreshToken

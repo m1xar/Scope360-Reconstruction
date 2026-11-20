@@ -22,6 +22,15 @@ const (
 	DemoEndpoint = "demo.ctraderapi.com:5035"
 )
 
+// dialEndpoint opens the TLS stream to a cTrader Open API endpoint (replaced in tests).
+var dialEndpoint = func(endpoint string) stream.DialFunc {
+	return stream.TLSDialer(endpoint, &tls.Config{ServerName: strings.Split(endpoint, ":")[0], MinVersion: tls.VersionTLS12})
+}
+
+// AlreadyLoggedInCode is what cTrader answers to a repeated application or account auth
+// on a connection where that auth has already succeeded.
+const AlreadyLoggedInCode = "ALREADY_LOGGED_IN"
+
 type Config struct {
 	Credentials    Credentials
 	StreamClient   *stream.Client
@@ -83,7 +92,7 @@ func (c *Client) Connect(ctx context.Context, endpoint string) error {
 	}
 	c.endpoint = endpoint
 	c.streamClient = stream.NewClient(stream.Config{
-		Dial:           stream.TLSDialer(endpoint, &tls.Config{ServerName: strings.Split(endpoint, ":")[0], MinVersion: tls.VersionTLS12}),
+		Dial:           dialEndpoint(endpoint),
 		Codec:          stream.BigEndianFrameCodec{},
 		MatchID:        matchClientMsgID,
 		EventHandler:   c.handleEvent,
@@ -107,7 +116,7 @@ func (c *Client) Do(ctx context.Context, payloadType pb.ProtoOAPayloadType, req 
 		return err
 	}
 	if _, refreshErr := c.RefreshToken(); refreshErr != nil {
-		return fmt.Errorf("%w; token refresh failed: %v", err, refreshErr)
+		return fmt.Errorf("%w; token refresh failed: %w", err, refreshErr)
 	}
 	if c.session != nil {
 		if authErr := c.accountAuth(ctx, false); authErr != nil {
@@ -257,9 +266,26 @@ func heartbeatFrame() ([]byte, error) {
 	return gproto.Marshal(msg)
 }
 
+// IsAlreadyAuthorized reports cTrader's ALREADY_LOGGED_IN ("Open API application is
+// already authorized"): the auth step was already done, so it is not an auth failure.
+func IsAlreadyAuthorized(err error) bool {
+	var apiErr APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	if strings.EqualFold(apiErr.Code, AlreadyLoggedInCode) {
+		return true
+	}
+	desc := strings.ToUpper(apiErr.Description)
+	return strings.Contains(desc, "ALREADY AUTHORIZED") || strings.Contains(desc, "ALREADY LOGGED IN")
+}
+
 func isAuthError(err error) bool {
 	var apiErr APIError
 	if !errors.As(err, &apiErr) {
+		return false
+	}
+	if IsAlreadyAuthorized(err) {
 		return false
 	}
 	code := strings.ToUpper(apiErr.Code)
