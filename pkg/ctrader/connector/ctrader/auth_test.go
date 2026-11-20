@@ -141,7 +141,9 @@ func useFake(t *testing.T, f *fakeOpenAPI) {
 	t.Helper()
 	prev := dialEndpoint
 	dialEndpoint = f.dial
-	t.Cleanup(func() { dialEndpoint = prev })
+	prevRegistry := refreshLocks
+	refreshLocks = &refreshRegistry{locks: map[[32]byte]*sync.Mutex{}, sets: map[[32]byte]rotatedSet{}}
+	t.Cleanup(func() { dialEndpoint, refreshLocks = prev, prevRegistry })
 }
 
 // tokenServer counts refresh calls; any call fails the "no refresh" tests.
@@ -332,5 +334,51 @@ func TestRejectedRefreshIsTyped(t *testing.T) {
 	var apiErr APIError
 	if !errors.As(err, &apiErr) || apiErr.Code != "CH_ACCESS_TOKEN_INVALID" {
 		t.Fatalf("error %v lost the provider code", err)
+	}
+}
+
+func TestParallelClientsOfOneGrantShareOneRefresh(t *testing.T) {
+	fake := newFakeOpenAPI(true, 5010782, "access-2")
+	useFake(t, fake)
+	calls, httpClient := tokenServer(t, `{"accessToken":"access-2","refreshToken":"refresh-2"}`)
+	var (
+		mu  sync.Mutex
+		got []TokenSet
+		wg  sync.WaitGroup
+	)
+	errs := make([]error, 4)
+	for i := range errs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			client := NewClient(Config{
+				Credentials: Credentials{ClientID: "id", ClientSecret: "secret", AccessToken: "access-1", RefreshToken: "refresh-1", AccountLogin: 5010782},
+				HTTPClient:  httpClient,
+				OnTokenRefresh: func(set TokenSet) {
+					mu.Lock()
+					got = append(got, set)
+					mu.Unlock()
+				},
+			})
+			defer client.Disconnect()
+			_, errs[i] = client.AuthSession(testCtx(t))
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("client %d: AuthSession error = %v", i, err)
+		}
+	}
+	if *calls != 1 {
+		t.Fatalf("token endpoint called %d times for one grant, want 1", *calls)
+	}
+	if len(got) != len(errs) {
+		t.Fatalf("callbacks = %d, want one per client", len(got))
+	}
+	for _, set := range got {
+		if set.AccessToken != "access-2" || set.RefreshToken != "refresh-2" {
+			t.Fatal("a client got a different pair than the single rotation")
+		}
 	}
 }
